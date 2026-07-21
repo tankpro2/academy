@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>유주코칭국어학원 - 학원통합관리시스템</title>
+  
+  <!-- Font & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="style.css">
+  <!-- Supabase CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+  <!-- 1. Floating Role Switcher Bar -->
+  <div class="role-switcher-bar no-print">
+    <div class="brand">
+      <i data-lucide="book-open"></i>
+      <span>유주 국어학원 통합관리</span>
+    </div>
+    <div class="role-buttons" id="roleSwitcher">
+      <button class="role-btn active" data-role="director">원장</button>
+      <button class="role-btn" data-role="teacher">강사</button>
+      <button class="role-btn" data-role="assistant">조교</button>
+      <button class="role-btn" data-role="student">학생/학부모</button>
+    </div>
+  </div>
+
+  <!-- Main App Layout -->
+  <div class="app-container">
+    
+    <!-- 2. Sidebar Navigation -->
+    <aside class="sidebar no-print" id="sidebar">
+      <!-- Navigation items will be dynamically updated based on active role -->
+    </aside>
+
+    <!-- 3. Main Content View -->
+    <main class="main-content" id="mainContent">
+      <!-- Active view content will be injected here -->
+    </main>
+
+  </div>
+
+  <!-- 4. Global Modals (Alerts, Forms) -->
+  <div id="modalOverlay" class="modal-overlay no-print" style="display: none;">
+    <div class="modal-content" id="modalContent">
+      <!-- Dynamic modal forms will load here -->
+    </div>
+  </div>
+
+  <!-- Business Logic Scripts -->
+  <script src="mockData.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
