@@ -28,16 +28,14 @@ let state = {
   notices: []
 };
 
-// 2. 초기 로드 및 LocalStorage / Supabase 하이브리드 동기화
+// 2. 초기 로드 및 Supabase 클라우드 데이터 동기화 (로컬스토리지 완전 배제)
 async function loadStateFromStorage() {
-  window.initializeStorage(); // mockData.js 함수 호출로 로컬 스토리지 기본 데이터 확보 (Fallback용)
-  
-  // 로컬 데이터를 우선 기본값으로 읽어옴
-  state.students = JSON.parse(localStorage.getItem("agy_students")) || [];
-  state.teachers = JSON.parse(localStorage.getItem("agy_teachers")) || [];
-  state.teacherSchedules = JSON.parse(localStorage.getItem("agy_teacher_schedules")) || [];
-  state.teacherWorkLogs = JSON.parse(localStorage.getItem("agy_teacher_worklogs")) || [];
-  state.operatingConfigs = JSON.parse(localStorage.getItem("agy_academy_configs")) || {
+  // 메모리 상 기본 상태 초기화 (운영 설정 기본값 지정)
+  state.students = [];
+  state.teachers = [];
+  state.teacherSchedules = [];
+  state.teacherWorkLogs = [];
+  state.operatingConfigs = {
     operatingDays: ["월", "화", "수", "목", "금", "토"],
     startTime: "13:00",
     endTime: "22:00",
@@ -52,124 +50,62 @@ async function loadStateFromStorage() {
       "일": { active: false, start: "13:00", end: "22:00" }
     }
   };
-  state.enrollments = JSON.parse(localStorage.getItem("agy_enrollments")) || [];
-  state.attendance = JSON.parse(localStorage.getItem("agy_attendance")) || [];
-  state.dailyPlans = JSON.parse(localStorage.getItem("agy_daily_plans")) || [];
-  state.notices = JSON.parse(localStorage.getItem("agy_notices")) || [];
+  state.enrollments = [];
+  state.attendance = [];
+  state.dailyPlans = [];
+  state.notices = [];
 
-  // 호환성 보장
-  if (!state.operatingConfigs.holidays) state.operatingConfigs.holidays = [];
-  if (!state.operatingConfigs.dayConfigs) {
-    state.operatingConfigs.dayConfigs = {
-      "월": { active: true, start: state.operatingConfigs.startTime || "13:00", end: state.operatingConfigs.endTime || "22:00" },
-      "화": { active: true, start: state.operatingConfigs.startTime || "13:00", end: state.operatingConfigs.endTime || "22:00" },
-      "수": { active: true, start: state.operatingConfigs.startTime || "13:00", end: state.operatingConfigs.endTime || "22:00" },
-      "목": { active: true, start: state.operatingConfigs.startTime || "13:00", end: state.operatingConfigs.endTime || "22:00" },
-      "금": { active: true, start: state.operatingConfigs.startTime || "13:00", end: state.operatingConfigs.endTime || "22:00" },
-      "토": { active: true, start: state.operatingConfigs.startTime || "13:00", end: state.operatingConfigs.endTime || "22:00" },
-      "일": { active: false, start: "13:00", end: "22:00" }
-    };
-  }
-
-  // Supabase가 연결되어 있는 경우 원격 데이터 동기화 (JSONB 방식)
+  // Supabase가 연결되어 있는 경우 원격 데이터 동기식 로드
   if (supabaseClient) {
     try {
-      console.log("Supabase 데이터 로딩 시작...");
+      console.log("Supabase 클라우드 데이터 로딩 시작...");
       
       // 1. 학생 로드
       const { data: dbStudents, error: errSt } = await supabaseClient.from("agy_students").select("*");
       if (!errSt && dbStudents) {
-        if (dbStudents.length > 0) {
-          state.students = dbStudents.map(row => row.data);
-          localStorage.setItem("agy_students", JSON.stringify(state.students));
-        } else if (state.students.length > 0) {
-          const rows = state.students.map(item => ({ id: item.id, data: item }));
-          await supabaseClient.from("agy_students").insert(rows);
-        }
+        state.students = dbStudents.map(row => row.data || row);
       }
 
       // 2. 강사 로드
       const { data: dbTeachers, error: errTc } = await supabaseClient.from("agy_teachers").select("*");
       if (!errTc && dbTeachers) {
-        if (dbTeachers.length > 0) {
-          state.teachers = dbTeachers.map(row => row.data);
-          localStorage.setItem("agy_teachers", JSON.stringify(state.teachers));
-        } else if (state.teachers.length > 0) {
-          const rows = state.teachers.map(item => ({ id: item.id, data: item }));
-          await supabaseClient.from("agy_teachers").insert(rows);
-        }
+        state.teachers = dbTeachers.map(row => row.data || row);
       }
 
       // 3. 강사 근무계획 로드
       const { data: dbSchedules, error: errSch } = await supabaseClient.from("agy_teacher_schedules").select("*");
       if (!errSch && dbSchedules) {
-        if (dbSchedules.length > 0) {
-          state.teacherSchedules = dbSchedules.map(row => row.data);
-          localStorage.setItem("agy_teacher_schedules", JSON.stringify(state.teacherSchedules));
-        } else if (state.teacherSchedules.length > 0) {
-          const rows = state.teacherSchedules.map(item => ({ id: item.id, data: item }));
-          await supabaseClient.from("agy_teacher_schedules").insert(rows);
-        }
+        state.teacherSchedules = dbSchedules.map(row => row.data || row);
       }
 
       // 4. 강사 근무일지 로드
       const { data: dbWorkLogs, error: errWl } = await supabaseClient.from("agy_teacher_worklogs").select("*");
       if (!errWl && dbWorkLogs) {
-        if (dbWorkLogs.length > 0) {
-          state.teacherWorkLogs = dbWorkLogs.map(row => row.data);
-          localStorage.setItem("agy_teacher_worklogs", JSON.stringify(state.teacherWorkLogs));
-        } else if (state.teacherWorkLogs.length > 0) {
-          const rows = state.teacherWorkLogs.map(item => ({ id: item.id, data: item }));
-          await supabaseClient.from("agy_teacher_worklogs").insert(rows);
-        }
+        state.teacherWorkLogs = dbWorkLogs.map(row => row.data || row);
       }
 
       // 5. 수강 신청 로드
       const { data: dbEnrollments, error: errEn } = await supabaseClient.from("agy_enrollments").select("*");
       if (!errEn && dbEnrollments) {
-        if (dbEnrollments.length > 0) {
-          state.enrollments = dbEnrollments.map(row => row.data);
-          localStorage.setItem("agy_enrollments", JSON.stringify(state.enrollments));
-        } else if (state.enrollments.length > 0) {
-          const rows = state.enrollments.map(item => ({ id: item.id, data: item }));
-          await supabaseClient.from("agy_enrollments").insert(rows);
-        }
+        state.enrollments = dbEnrollments.map(row => row.data || row);
       }
 
       // 6. 출결 기록 로드
       const { data: dbAttendance, error: errAtt } = await supabaseClient.from("agy_attendance").select("*");
       if (!errAtt && dbAttendance) {
-        if (dbAttendance.length > 0) {
-          state.attendance = dbAttendance.map(row => row.data);
-          localStorage.setItem("agy_attendance", JSON.stringify(state.attendance));
-        } else if (state.attendance.length > 0) {
-          const rows = state.attendance.map(item => ({ id: item.id, data: item }));
-          await supabaseClient.from("agy_attendance").insert(rows);
-        }
+        state.attendance = dbAttendance.map(row => row.data || row);
       }
 
       // 7. 당일 진도 계획/실적 로드
       const { data: dbPlans, error: errPl } = await supabaseClient.from("agy_daily_plans").select("*");
       if (!errPl && dbPlans) {
-        if (dbPlans.length > 0) {
-          state.dailyPlans = dbPlans.map(row => row.data);
-          localStorage.setItem("agy_daily_plans", JSON.stringify(state.dailyPlans));
-        } else if (state.dailyPlans.length > 0) {
-          const rows = state.dailyPlans.map(item => ({ id: item.id, data: item }));
-          await supabaseClient.from("agy_daily_plans").insert(rows);
-        }
+        state.dailyPlans = dbPlans.map(row => row.data || row);
       }
 
       // 8. 공지사항 로드
       const { data: dbNotices, error: errNt } = await supabaseClient.from("agy_notices").select("*");
       if (!errNt && dbNotices) {
-        if (dbNotices.length > 0) {
-          state.notices = dbNotices.map(row => row.data);
-          localStorage.setItem("agy_notices", JSON.stringify(state.notices));
-        } else if (state.notices.length > 0) {
-          const rows = state.notices.map(item => ({ id: item.id, data: item }));
-          await supabaseClient.from("agy_notices").insert(rows);
-        }
+        state.notices = dbNotices.map(row => row.data || row);
       }
 
       // 9. 학원 기본 운영 설정 로드
@@ -178,13 +114,10 @@ async function loadStateFromStorage() {
         const row = dbConfigs.find(c => c.key === "main_config");
         if (row && row.configs) {
           state.operatingConfigs = row.configs;
-          localStorage.setItem("agy_academy_configs", JSON.stringify(state.operatingConfigs));
         }
-      } else if (state.operatingConfigs) {
-        await supabaseClient.from("agy_academy_configs").upsert([{ key: "main_config", configs: state.operatingConfigs }]);
       }
 
-      console.log("Supabase 데이터 동기화 완료!");
+      console.log("Supabase 클라우드 데이터 연동 완료!");
       
       // 첫 로딩 후 한 번 화면을 리프레시하여 Supabase에서 갓 가져온 데이터 렌더링
       const mainContainer = document.getElementById("mainContent");
@@ -192,36 +125,100 @@ async function loadStateFromStorage() {
         navigate(state.currentView);
       }
     } catch (e) {
-      console.warn("Supabase 연결 중 예외 발생 (Fallback 로컬 데이터로 원활하게 구동합니다):", e);
+      console.error("Supabase 로딩 중 에러 발생:", e);
     }
   }
 }
 
-// 상태 변경 시 LocalStorage 저장 및 Supabase 비동기 동기화 (Upsert)
+// 상태 변경 시 Supabase 클라우드로 즉시 업로드 (로컬스토리지 완전 배제)
 function saveStateToStorage() {
-  // 1. LocalStorage 동기화 (신속한 반응성 보장)
-  localStorage.setItem("agy_students", JSON.stringify(state.students));
-  localStorage.setItem("agy_teachers", JSON.stringify(state.teachers));
-  localStorage.setItem("agy_teacher_schedules", JSON.stringify(state.teacherSchedules));
-  localStorage.setItem("agy_teacher_worklogs", JSON.stringify(state.teacherWorkLogs));
-  localStorage.setItem("agy_academy_configs", JSON.stringify(state.operatingConfigs));
-  localStorage.setItem("agy_enrollments", JSON.stringify(state.enrollments));
-  localStorage.setItem("agy_attendance", JSON.stringify(state.attendance));
-  localStorage.setItem("agy_daily_plans", JSON.stringify(state.dailyPlans));
-  localStorage.setItem("agy_notices", JSON.stringify(state.notices));
-
-  // 2. Supabase 비동기 동기화 (원격 저장소 반영 - JSONB 구조)
+  // Supabase 비동기 동기화 (원격 저장소 반영 - 테이블 컬럼 100% 매칭 구조)
   if (supabaseClient) {
-    const studentRows = state.students.map(item => ({ id: item.id, data: item }));
-    const teacherRows = state.teachers.map(item => ({ id: item.id, data: item }));
-    const scheduleRows = state.teacherSchedules.map(item => ({ id: item.id, data: item }));
-    const worklogRows = state.teacherWorkLogs.map(item => ({ id: item.id, data: item }));
-    const enrollmentRows = state.enrollments.map(item => ({ id: item.id, data: item }));
-    const attendanceRows = state.attendance.map(item => ({ id: item.id, data: item }));
-    const planRows = state.dailyPlans.map(item => ({ id: item.id, data: item }));
-    const noticeRows = state.notices.map(item => ({ id: item.id, data: item }));
+    const studentRows = state.students.map(item => ({
+      id: item.id,
+      name: item.name || "",
+      gender: item.gender || "",
+      school: item.school || "",
+      grade: item.grade || "",
+      career: item.career || (item.careerHopes ? item.careerHopes.join(", ") : ""),
+      registeredDate: item.registeredDate || null,
+      isEditAllowed: item.isEditAllowed || false,
+      memo: item.specialNote || ""
+    }));
 
-    // 개별 안전 비동기 전송 헬퍼 함수 (Uncaught TypeError: upsert(...).catch is not a function 해결)
+    const teacherRows = state.teachers.map(item => ({
+      id: item.id,
+      name: item.name || "",
+      phone: item.phone || "",
+      subject: item.subject || "",
+      status: item.status || "active",
+      registeredDate: item.registeredDate || null
+    }));
+
+    const scheduleRows = state.teacherSchedules.map(item => ({
+      id: item.id,
+      teacherId: item.teacherId,
+      dayOfWeek: item.dayOfWeek,
+      startTime: item.startTime,
+      endTime: item.endTime
+    }));
+
+    const worklogRows = state.teacherWorkLogs.map(item => ({
+      id: item.id,
+      teacherId: item.teacherId,
+      date: item.date,
+      planStartTime: item.planStartTime,
+      planEndTime: item.planEndTime,
+      actualStartTime: item.actualStartTime || "",
+      actualEndTime: item.actualEndTime || "",
+      breakMinutes: item.breakMinutes || 0,
+      isConfirmed: item.isConfirmed || false
+    }));
+
+    const enrollmentRows = state.enrollments.map(item => ({
+      id: item.id,
+      studentId: item.studentId,
+      date: item.date,
+      startTime: item.startTime,
+      endTime: item.endTime
+    }));
+
+    const attendanceRows = state.attendance.map(item => ({
+      id: item.id,
+      studentId: item.studentId,
+      date: item.date,
+      status: item.status,
+      plannedIn: item.plannedIn,
+      plannedOut: item.plannedOut,
+      actualIn: item.actualIn || "",
+      actualOut: item.actualOut || "",
+      isConfirmed: item.isConfirmed || false
+    }));
+
+    const planRows = state.dailyPlans.map(item => ({
+      id: item.id,
+      studentId: item.studentId,
+      date: item.date,
+      activityName: item.activityName,
+      plannedStartTime: item.plannedStartTime,
+      plannedEndTime: item.plannedEndTime,
+      plannedDuration: item.plannedDuration || 0,
+      actualStartTime: item.actualStartTime || "",
+      actualEndTime: item.actualEndTime || "",
+      isCompleted: item.isCompleted || false,
+      isConfirmed: item.isConfirmed || false,
+      isPlanConfirmed: item.isPlanConfirmed || false
+    }));
+
+    const noticeRows = state.notices.map(item => ({
+      id: item.id,
+      title: item.title,
+      content: item.content,
+      date: item.date,
+      author: item.author
+    }));
+
+    // 개별 안전 비동기 전송 헬퍼 함수
     const syncTable = async (tableName, rows) => {
       try {
         const { error } = await supabaseClient.from(tableName).upsert(rows);
@@ -242,7 +239,7 @@ function saveStateToStorage() {
       syncTable("agy_notices", noticeRows),
       syncTable("agy_academy_configs", [{ key: "main_config", configs: state.operatingConfigs }])
     ]).then(() => {
-      console.log("Supabase 백그라운드 동기화 완료.");
+      console.log("Supabase 클라우드 동기화 완료.");
     });
   }
 }
