@@ -1,271 +1,1664 @@
-// 학원 관리 시스템 핵심 비즈니스 로직 및 UI 인터랙션 (app.js)
+// 학원 통합 관리 시스템 - 핵심 비즈니스 로직 및 렌더러 (app.js)
 
-// Supabase 클라이언트 초기화
+// 1. Supabase 클라이언트 초기화
 const supabaseUrl = "https://ovqkukazbvwjqdxqpfvj.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92cWt1a2F6YnZ3anFkeHFwZnZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1MjEyMDksImV4cCI6MjEwMDA5NzIwOX0.fjCKRvGuJwJh6v6admjgLzqdwLY6dvgOZ1e1u-0vc9s";
 const supabaseClient = window.supabase ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
 
-// 1. 애플리케이션 상태 관리 (State)
+// 2. 어플리케이션 상태 관리 (State)
 let state = {
-  currentRole: "director", // director, teacher, assistant, student
-  currentView: "dashboard", // dashboard, studentManage, teacherManage, timetable, progress
-  selectedStudentId: "st-1", // 학생 모드 시 선택된 학생
-  selectedTeacherId: "tc-1", // 강사 모드 시 선택된 강사
-  targetProgressStudentId: "st-1", // 진도관리에서 교사가 선택한 학생
-  selectedDate: "2026-07-21", // 시뮬레이션 기본 날짜 (요구사항 일치)
-  studentTab: "register", // register, attendance
-  teacherTab: "register", // register, plan, worklog, stats
-  timetableTab: "registerCalendar", // registerCalendar, dailyList, weeklyList
-  progressTab: "plan", // plan(계획 수립), performance(실적 등록)
-  operatingConfigs: null, // 운영 시간 설정
-  students: [],
-  teachers: [],
-  teacherSchedules: [],
-  teacherWorkLogs: [],
-  enrollments: [],
-  attendance: [],
-  dailyPlans: [],
-  notices: []
+  currentUser: null,          // 현재 로그인한 사용자 객체 { username, role, is_password_changed, ref_id }
+  currentView: "dashboard",   // 현재 보고 있는 화면
+  students: [],               // 학생 목록
+  teachers: [],               // 강사 목록
+  teacherSchedules: [],       // 강사 근무계획 목록
+  teacherWorkLogs: [],        // 강사 실제 근무일지 목록
+  enrollments: [],            // 수강신청 목록
+  attendance: [],             // 출결 기록 목록
+  dailyPlans: [],             // 당일 진도 계획/실적 목록
+  notices: [],                // 공지사항 목록
+  monthlyOperations: {},      // 월별 학원 가동 정보 (키: 'YYYY-MM', 값: { 'YYYY-MM-DD': { isHoliday, start, end } })
+  
+  // 시뮬레이션 기준 날짜
+  selectedDate: new Date().toISOString().split("T")[0]
 };
 
-// 2. 초기 로드 및 Supabase 클라우드 데이터 동기화 (로컬스토리지 완전 배제)
-async function loadStateFromStorage() {
-  // 메모리 상 기본 상태 초기화 (운영 설정 기본값 지정)
-  state.students = [];
-  state.teachers = [];
-  state.teacherSchedules = [];
-  state.teacherWorkLogs = [];
-  state.operatingConfigs = {
-    operatingDays: ["월", "화", "수", "목", "금", "토"],
-    startTime: "13:00",
-    endTime: "22:00",
-    holidays: [],
-    dayConfigs: {
-      "월": { active: true, start: "13:00", end: "22:00" },
-      "화": { active: true, start: "13:00", end: "22:00" },
-      "수": { active: true, start: "13:00", end: "22:00" },
-      "목": { active: true, start: "13:00", end: "22:00" },
-      "금": { active: true, start: "13:00", end: "22:00" },
-      "토": { active: true, start: "13:00", end: "22:00" },
-      "일": { active: false, start: "13:00", end: "22:00" }
+// 3. 앱 구동 및 데이터 로딩 시작
+document.addEventListener("DOMContentLoaded", async () => {
+  // 아이콘 초기 렌더링
+  if (window.lucide) window.lucide.createIcons();
+  
+  // Supabase 연결 불가 시 안내
+  if (!supabaseClient) {
+    alert("Supabase 클라이언트를 초기화할 수 없습니다. 인터넷 연결을 확인해 주세요.");
+    return;
+  }
+
+  // 1. 테이블 초기 데이터 Seeding (비어있을 경우)
+  await seedDatabaseIfEmpty();
+
+  // 2. 브라우저 세션 로그인 상태 복원
+  const cachedUser = localStorage.getItem("yuju_logged_user");
+  if (cachedUser) {
+    state.currentUser = JSON.parse(cachedUser);
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("appScreen").style.display = "flex";
+    
+    // 유저 프로필 업데이트
+    document.getElementById("profileName").innerText = state.currentUser.username;
+    document.getElementById("profileRole").innerText = getRoleKorean(state.currentUser.role);
+    
+    // 데이터 불러오기 및 대시보드 진입
+    await loadAllData();
+    renderSidebarMenu();
+    navigate("dashboard");
+    if (state.currentUser.role === 'director' && state.students.some(s => s.name.startsWith("학생"))) {
+      console.log("구식 학생 이름 데이터 감지: 자동 실제 이름 데이터 갱신 실행 중...");
+      await forceResetDatabase();
     }
-  };
-  state.enrollments = [];
-  state.attendance = [];
-  state.dailyPlans = [];
-  state.notices = [];
+  } else {
+    // 퍼블릭 홈페이지(학원 소개) 기본 표출
+    openPublicHomepage();
+  }
+});
 
-  // Supabase가 연결되어 있는 경우 원격 데이터 동기식 로드
-  if (supabaseClient) {
-    try {
-      console.log("Supabase 클라우드 데이터 로딩 시작...");
-      
-      // 1. 학생 로드
-      const { data: dbStudents, error: errSt } = await supabaseClient.from("agy_students").select("*");
-      if (!errSt && dbStudents) {
-        state.students = dbStudents.map(row => row.data || row);
-      }
+// 한국어 역할 표시 변환 헬퍼
+function getRoleKorean(role) {
+  const mapping = { director: "원장", teacher: "강사", assistant: "조교", student: "학생/학부모" };
+  return mapping[role] || "사용자";
+}
 
-      // 2. 강사 로드
-      const { data: dbTeachers, error: errTc } = await supabaseClient.from("agy_teachers").select("*");
-      if (!errTc && dbTeachers) {
-        state.teachers = dbTeachers.map(row => row.data || row);
-      }
-
-      // 3. 강사 근무계획 로드
-      const { data: dbSchedules, error: errSch } = await supabaseClient.from("agy_teacher_schedules").select("*");
-      if (!errSch && dbSchedules) {
-        state.teacherSchedules = dbSchedules.map(row => row.data || row);
-      }
-
-      // 4. 강사 근무일지 로드
-      const { data: dbWorkLogs, error: errWl } = await supabaseClient.from("agy_teacher_worklogs").select("*");
-      if (!errWl && dbWorkLogs) {
-        state.teacherWorkLogs = dbWorkLogs.map(row => row.data || row);
-      }
-
-      // 5. 수강 신청 로드
-      const { data: dbEnrollments, error: errEn } = await supabaseClient.from("agy_enrollments").select("*");
-      if (!errEn && dbEnrollments) {
-        state.enrollments = dbEnrollments.map(row => row.data || row);
-      }
-
-      // 6. 출결 기록 로드
-      const { data: dbAttendance, error: errAtt } = await supabaseClient.from("agy_attendance").select("*");
-      if (!errAtt && dbAttendance) {
-        state.attendance = dbAttendance.map(row => row.data || row);
-      }
-
-      // 7. 당일 진도 계획/실적 로드
-      const { data: dbPlans, error: errPl } = await supabaseClient.from("agy_daily_plans").select("*");
-      if (!errPl && dbPlans) {
-        state.dailyPlans = dbPlans.map(row => row.data || row);
-      }
-
-      // 8. 공지사항 로드
-      const { data: dbNotices, error: errNt } = await supabaseClient.from("agy_notices").select("*");
-      if (!errNt && dbNotices) {
-        state.notices = dbNotices.map(row => row.data || row);
-      }
-
-      // 9. 학원 기본 운영 설정 로드
-      const { data: dbConfigs, error: errCfg } = await supabaseClient.from("agy_academy_configs").select("*");
-      if (!errCfg && dbConfigs && dbConfigs.length > 0) {
-        const row = dbConfigs.find(c => c.key === "main_config");
-        if (row && row.configs) {
-          state.operatingConfigs = row.configs;
-        }
-      }
-
-      console.log("Supabase 클라우드 데이터 연동 완료!");
-      
-      // 첫 로딩 후 한 번 화면을 리프레시하여 Supabase에서 갓 가져온 데이터 렌더링
-      const mainContainer = document.getElementById("mainContent");
-      if (mainContainer) {
-        navigate(state.currentView);
-      }
-    } catch (e) {
-      console.error("Supabase 로딩 중 에러 발생:", e);
+// 4. 데이터베이스 자동 Seeding 기능
+async function seedDatabaseIfEmpty() {
+  try {
+    // 1. 사용자 테이블 (agy_users)
+    const { data: dbUsers } = await supabaseClient.from("agy_users").select("username").limit(1);
+    if (!dbUsers || dbUsers.length === 0) {
+      console.log("Seeding agy_users...");
+      await supabaseClient.from("agy_users").insert(window.mockData.users);
     }
+    
+    // 2. 학생 테이블 (agy_students)
+    const { data: dbStudents } = await supabaseClient.from("agy_students").select("id").limit(1);
+    if (!dbStudents || dbStudents.length === 0) {
+      console.log("Seeding agy_students...");
+      const rows = window.mockData.students.map(s => ({ id: s.id, data: s }));
+      await supabaseClient.from("agy_students").insert(rows);
+    }
+    
+    // 3. 강사 테이블 (agy_teachers)
+    const { data: dbTeachers } = await supabaseClient.from("agy_teachers").select("id").limit(1);
+    if (!dbTeachers || dbTeachers.length === 0) {
+      console.log("Seeding agy_teachers...");
+      const rows = window.mockData.teachers.map(t => ({ id: t.id, data: t }));
+      await supabaseClient.from("agy_teachers").insert(rows);
+    }
+    
+    // 4. 강사 근무계획 (agy_teacher_schedules)
+    const { data: dbSchedules } = await supabaseClient.from("agy_teacher_schedules").select("id").limit(1);
+    if (!dbSchedules || dbSchedules.length === 0) {
+      console.log("Seeding agy_teacher_schedules...");
+      const rows = window.mockData.teacherSchedules.map(sc => ({ id: sc.id, data: sc }));
+      await supabaseClient.from("agy_teacher_schedules").insert(rows);
+    }
+    
+    // 5. 공지사항 (agy_notices)
+    const { data: dbNotices } = await supabaseClient.from("agy_notices").select("id").limit(1);
+    if (!dbNotices || dbNotices.length === 0) {
+      console.log("Seeding agy_notices...");
+      const rows = window.mockData.notices.map(n => ({ id: n.id, data: n }));
+      await supabaseClient.from("agy_notices").insert(rows);
+    }
+    
+    // 6. 강사 근무일지 (agy_teacher_worklogs)
+    const { data: dbWorklogs } = await supabaseClient.from("agy_teacher_worklogs").select("id").limit(1);
+    if (!dbWorklogs || dbWorklogs.length === 0) {
+      console.log("Seeding agy_teacher_worklogs...");
+      const rows = window.mockData.teacherWorkLogs.map(wl => ({ id: wl.id, data: wl }));
+      await supabaseClient.from("agy_teacher_worklogs").insert(rows);
+    }
+    
+    // 7. 수강신청 (agy_enrollments)
+    const { data: dbEnrollments } = await supabaseClient.from("agy_enrollments").select("id").limit(1);
+    if (!dbEnrollments || dbEnrollments.length === 0) {
+      console.log("Seeding agy_enrollments...");
+      const rows = window.mockData.enrollments.map(e => ({ id: e.id, data: e }));
+      await supabaseClient.from("agy_enrollments").insert(rows);
+    }
+    
+    // 8. 출결기록 (agy_attendance)
+    const { data: dbAttendance } = await supabaseClient.from("agy_attendance").select("id").limit(1);
+    if (!dbAttendance || dbAttendance.length === 0) {
+      console.log("Seeding agy_attendance...");
+      const rows = window.mockData.attendance.map(a => ({ id: a.id, data: a }));
+      await supabaseClient.from("agy_attendance").insert(rows);
+    }
+    
+    // 9. 당일 진도 계획 (agy_daily_plans)
+    const { data: dbPlans } = await supabaseClient.from("agy_daily_plans").select("id").limit(1);
+    if (!dbPlans || dbPlans.length === 0) {
+      console.log("Seeding agy_daily_plans...");
+      const rows = window.mockData.dailyPlans.map(dp => ({ id: dp.id, data: dp }));
+      await supabaseClient.from("agy_daily_plans").insert(rows);
+    }
+    
+    // 10. 운영시간 (agy_monthly_operations)
+    const { data: dbOps } = await supabaseClient.from("agy_monthly_operations").select("year_month").limit(1);
+    if (!dbOps || dbOps.length === 0) {
+      console.log("Seeding agy_monthly_operations...");
+      const currentYearMonth = "2026-07";
+      const nextYearMonth = "2026-08";
+      await saveDefaultMonthlyOperation(currentYearMonth);
+      await saveDefaultMonthlyOperation(nextYearMonth);
+    }
+    
+    console.log("Seeding 완료!");
+  } catch (err) {
+    console.error("데이터베이스 Seeding 중 오류 발생:", err);
   }
 }
 
-// 상태 변경 시 Supabase 클라우드로 즉시 업로드 (로컬스토리지 완전 배제)
-function saveStateToStorage() {
-  // Supabase 비동기 동기화 (원격 저장소 반영 - 테이블 컬럼 100% 매칭 구조)
-  if (supabaseClient) {
-    const studentRows = state.students.map(item => ({
-      id: item.id,
-      name: item.name || "",
-      gender: item.gender || "",
-      school: item.school || "",
-      grade: item.grade || "",
-      career: item.career || (item.careerHopes ? item.careerHopes.join(", ") : ""),
-      registeredDate: item.registeredDate || null,
-      isEditAllowed: item.isEditAllowed || false,
-      memo: item.specialNote || ""
-    }));
+// 데이터베이스 모든 테이블 초기화 후 테스트 데이터 20건씩 강제 시딩
+async function forceResetDatabase() {
+  if (!confirm("데이터베이스의 모든 데이터를 삭제하고, 각 항목당 정확히 20건씩의 테스트 데이터로 강제 초기화하시겠습니까?")) return;
+  
+  const btn = document.querySelector(".btn-danger-reset");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = "초기화 중...";
+  }
+  
+  try {
+    console.log("Forcing database reset...");
+    
+    // 1. 모든 테이블 데이터 삭제
+    await Promise.all([
+      supabaseClient.from("agy_users").delete().neq("username", ""),
+      supabaseClient.from("agy_students").delete().neq("id", ""),
+      supabaseClient.from("agy_teachers").delete().neq("id", ""),
+      supabaseClient.from("agy_teacher_schedules").delete().neq("id", ""),
+      supabaseClient.from("agy_teacher_worklogs").delete().neq("id", ""),
+      supabaseClient.from("agy_enrollments").delete().neq("id", ""),
+      supabaseClient.from("agy_attendance").delete().neq("id", ""),
+      supabaseClient.from("agy_daily_plans").delete().neq("id", ""),
+      supabaseClient.from("agy_notices").delete().neq("id", ""),
+      supabaseClient.from("agy_monthly_operations").delete().neq("year_month", "")
+    ]);
+    
+    console.log("All tables truncated. Starting re-seeding...");
+    
+    // 2. 다시 Seeding 진행 (순차적으로 진행하여 안정성 확보)
+    await supabaseClient.from("agy_users").insert(window.mockData.users);
+    
+    const studentRows = window.mockData.students.map(s => ({ id: s.id, data: s }));
+    await supabaseClient.from("agy_students").insert(studentRows);
+    
+    const teacherRows = window.mockData.teachers.map(t => ({ id: t.id, data: t }));
+    await supabaseClient.from("agy_teachers").insert(teacherRows);
+    
+    const scheduleRows = window.mockData.teacherSchedules.map(sc => ({ id: sc.id, data: sc }));
+    await supabaseClient.from("agy_teacher_schedules").insert(scheduleRows);
+    
+    const noticeRows = window.mockData.notices.map(n => ({ id: n.id, data: n }));
+    await supabaseClient.from("agy_notices").insert(noticeRows);
+    
+    const worklogRows = window.mockData.teacherWorkLogs.map(wl => ({ id: wl.id, data: wl }));
+    await supabaseClient.from("agy_teacher_worklogs").insert(worklogRows);
+    
+    const enrollmentRows = window.mockData.enrollments.map(e => ({ id: e.id, data: e }));
+    await supabaseClient.from("agy_enrollments").insert(enrollmentRows);
+    
+    const attendanceRows = window.mockData.attendance.map(a => ({ id: a.id, data: a }));
+    await supabaseClient.from("agy_attendance").insert(attendanceRows);
+    
+    const planRows = window.mockData.dailyPlans.map(dp => ({ id: dp.id, data: dp }));
+    await supabaseClient.from("agy_daily_plans").insert(planRows);
+    
+    const currentYearMonth = "2026-07";
+    const nextYearMonth = "2026-08";
+    await saveDefaultMonthlyOperation(currentYearMonth);
+    await saveDefaultMonthlyOperation(nextYearMonth);
+    
+    alert("데이터베이스가 성공적으로 강제 초기화(정확히 20건씩 세팅)되었습니다!");
+    
+    // 세션 갱신을 위해 새로고침
+    localStorage.removeItem("yuju_logged_user");
+    location.reload();
+  } catch (err) {
+    console.error("데이터베이스 초기화 실패:", err);
+    alert("초기화 중 오류가 발생했습니다: " + err.message);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "⚡ DB 테스트 데이터 강제 초기화";
+    }
+  }
+}
+window.forceResetDatabase = forceResetDatabase;
 
-    const teacherRows = state.teachers.map(item => ({
-      id: item.id,
-      name: item.name || "",
-      phone: item.phone || "",
-      subject: item.subject || "",
-      status: item.status || "active",
-      registeredDate: item.registeredDate || null
-    }));
+// 기본 월 운영 시간 세팅 및 DB 저장 헬퍼
+async function saveDefaultMonthlyOperation(yearMonth) {
+  const [year, month] = yearMonth.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const configs = {};
+  
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${yearMonth}-${String(d).padStart(2, "0")}`;
+    const dayOfWeek = new Date(dateStr).getDay(); // 0: 일, 6: 토
+    
+    if (dayOfWeek === 0) {
+      // 일요일은 휴무
+      configs[dateStr] = { isHoliday: true, start: "13:00", end: "22:00" };
+    } else {
+      // 기본 가동시간 평일/토요일: 13:00 ~ 22:00
+      configs[dateStr] = { isHoliday: false, start: "13:00", end: "22:00" };
+    }
+  }
+  
+  await supabaseClient.from("agy_monthly_operations").upsert([{ year_month: yearMonth, configs }]);
+}
 
-    const scheduleRows = state.teacherSchedules.map(item => ({
-      id: item.id,
-      teacherId: item.teacherId,
-      dayOfWeek: item.dayOfWeek,
-      startTime: item.startTime,
-      endTime: item.endTime
-    }));
-
-    const worklogRows = state.teacherWorkLogs.map(item => ({
-      id: item.id,
-      teacherId: item.teacherId,
-      date: item.date,
-      planStartTime: item.planStartTime,
-      planEndTime: item.planEndTime,
-      actualStartTime: item.actualStartTime || "",
-      actualEndTime: item.actualEndTime || "",
-      breakMinutes: item.breakMinutes || 0,
-      isConfirmed: item.isConfirmed || false
-    }));
-
-    const enrollmentRows = state.enrollments.map(item => ({
-      id: item.id,
-      studentId: item.studentId,
-      date: item.date,
-      startTime: item.startTime,
-      endTime: item.endTime
-    }));
-
-    const attendanceRows = state.attendance.map(item => ({
-      id: item.id,
-      studentId: item.studentId,
-      date: item.date,
-      status: item.status,
-      plannedIn: item.plannedIn,
-      plannedOut: item.plannedOut,
-      actualIn: item.actualIn || "",
-      actualOut: item.actualOut || "",
-      isConfirmed: item.isConfirmed || false
-    }));
-
-    const planRows = state.dailyPlans.map(item => ({
-      id: item.id,
-      studentId: item.studentId,
-      date: item.date,
-      activityName: item.activityName,
-      plannedStartTime: item.plannedStartTime,
-      plannedEndTime: item.plannedEndTime,
-      plannedDuration: item.plannedDuration || 0,
-      actualStartTime: item.actualStartTime || "",
-      actualEndTime: item.actualEndTime || "",
-      isCompleted: item.isCompleted || false,
-      isConfirmed: item.isConfirmed || false,
-      isPlanConfirmed: item.isPlanConfirmed || false
-    }));
-
-    const noticeRows = state.notices.map(item => ({
-      id: item.id,
-      title: item.title,
-      content: item.content,
-      date: item.date,
-      author: item.author
-    }));
-
-    // 개별 안전 비동기 전송 헬퍼 함수
-    const syncTable = async (tableName, rows) => {
-      try {
-        const { error } = await supabaseClient.from(tableName).upsert(rows);
-        if (error) console.error(`${tableName} sync error:`, error);
-      } catch (e) {
-        console.error(`${tableName} exception:`, e);
-      }
-    };
-
-    Promise.all([
-      syncTable("agy_students", studentRows),
-      syncTable("agy_teachers", teacherRows),
-      syncTable("agy_teacher_schedules", scheduleRows),
-      syncTable("agy_teacher_worklogs", worklogRows),
-      syncTable("agy_enrollments", enrollmentRows),
-      syncTable("agy_attendance", attendanceRows),
-      syncTable("agy_daily_plans", planRows),
-      syncTable("agy_notices", noticeRows),
-      syncTable("agy_academy_configs", [{ key: "main_config", configs: state.operatingConfigs }])
-    ]).then(() => {
-      console.log("Supabase 클라우드 동기화 완료.");
+// 5. 전체 데이터 로드 함수 (새로고침, 로그인 후 구동)
+async function loadAllData() {
+  try {
+    const [
+      resStudents,
+      resTeachers,
+      resSchedules,
+      resWorklogs,
+      resEnrollments,
+      resAttendance,
+      resDailyPlans,
+      resNotices,
+      resOperations
+    ] = await Promise.all([
+      supabaseClient.from("agy_students").select("*"),
+      supabaseClient.from("agy_teachers").select("*"),
+      supabaseClient.from("agy_teacher_schedules").select("*"),
+      supabaseClient.from("agy_teacher_worklogs").select("*"),
+      supabaseClient.from("agy_enrollments").select("*"),
+      supabaseClient.from("agy_attendance").select("*"),
+      supabaseClient.from("agy_daily_plans").select("*"),
+      supabaseClient.from("agy_notices").select("*"),
+      supabaseClient.from("agy_monthly_operations").select("*")
+    ]);
+    
+    state.students = (resStudents.data || []).map(r => r.data);
+    state.teachers = (resTeachers.data || []).map(r => r.data);
+    state.teacherSchedules = (resSchedules.data || []).map(r => r.data);
+    state.teacherWorkLogs = (resWorklogs.data || []).map(r => r.data);
+    state.enrollments = (resEnrollments.data || []).map(r => r.data);
+    state.attendance = (resAttendance.data || []).map(r => r.data);
+    state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
+    state.notices = (resNotices.data || []).map(r => r.data);
+    
+    state.monthlyOperations = {};
+    (resOperations.data || []).forEach(r => {
+      state.monthlyOperations[r.year_month] = r.configs;
     });
+    
+    console.log("Supabase 데이터 로드 완료!");
+  } catch (err) {
+    console.error("데이터 로딩 중 치명적 오류 발생:", err);
   }
 }
 
-// 3. 헬퍼 유틸리티 함수
-function getGradeGroup(gradeStr) {
-  if (!gradeStr) return "기타";
-  if (gradeStr.includes("초등")) {
-    if (gradeStr.includes("1학년") || gradeStr.includes("2학년") || gradeStr.includes("3학년") || gradeStr.includes("4학년") || gradeStr.includes("저")) {
-      return "초등 저";
+// 6. 로그인 / 비밀번호 변경 로직
+async function handleLoginSubmit(event) {
+  event.preventDefault();
+  const usernameInput = document.getElementById("loginUsername").value.trim();
+  const passwordInput = document.getElementById("loginPassword").value.trim();
+  
+  try {
+    const { data: user, error } = await supabaseClient
+      .from("agy_users")
+      .select("*")
+      .eq("username", usernameInput)
+      .single();
+      
+    if (error || !user) {
+      alert("등록되지 않은 사용자 이름입니다.");
+      return;
     }
-    if (gradeStr.includes("5학년") || gradeStr.includes("6학년") || gradeStr.includes("고")) {
-      return "초등 고";
+    
+    if (user.password !== passwordInput) {
+      alert("비밀번호가 올바르지 않습니다.");
+      return;
     }
-    return "초등 저";
+    
+    // 로그인 성공 시
+    state.currentUser = user;
+    
+    // 만약 비밀번호가 초기값 '1234' 이거나 아직 변경한 적이 없는 경우 -> 강제 변경 카드 노출
+    if (user.password === "1234" && !user.is_password_changed) {
+      document.getElementById("loginCard").style.display = "none";
+      document.getElementById("changePwCard").style.display = "block";
+      validateNewPassword(""); // 가이드 초기화
+      if (window.lucide) window.lucide.createIcons();
+    } else {
+      // 변경 이력이 있으면 바로 메인 진입
+      completeLoginSession();
+    }
+  } catch (err) {
+    console.error("로그인 처리 중 에러:", err);
   }
-  if (gradeStr.includes("중등") || gradeStr.includes("중학교")) {
-    return "중등";
-  }
-  if (gradeStr.includes("고등") || gradeStr.includes("고등학교")) {
-    return "고등";
-  }
-  return gradeStr;
 }
 
-function calculateDuration(start, end) {
+function completeLoginSession() {
+  localStorage.setItem("yuju_logged_user", JSON.stringify(state.currentUser));
+  document.getElementById("loginScreen").style.display = "none";
+  document.getElementById("appScreen").style.display = "flex";
+  
+  document.getElementById("profileName").innerText = state.currentUser.username;
+  document.getElementById("profileRole").innerText = getRoleKorean(state.currentUser.role);
+  
+  loadAllData().then(async () => {
+    renderSidebarMenu();
+    navigate("dashboard");
+    
+    if (state.currentUser.role === 'director' && state.students.some(s => s.name.startsWith("학생"))) {
+      console.log("구식 학생 이름 데이터 감지: 자동 실제 이름 데이터 갱신 실행 중...");
+      await forceResetDatabase();
+    }
+  });
+}
+
+// 비밀번호 규칙 실시간 실효성 체크
+function validateNewPassword(val) {
+  const hasLength = val.length >= 8;
+  const hasLetter = /[A-Za-z]/.test(val);
+  const hasNumber = /\d/.test(val);
+  const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(val);
+  
+  updateRuleIndicator("ruleLength", hasLength);
+  updateRuleIndicator("ruleLetter", hasLetter);
+  updateRuleIndicator("ruleNumber", hasNumber);
+  updateRuleIndicator("ruleSpecial", hasSpecial);
+  
+  // 확인란 체크도 연동
+  checkPwMatch();
+}
+
+function updateRuleIndicator(elementId, isValid) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  if (isValid) {
+    el.classList.add("valid");
+    el.innerHTML = `<i data-lucide="check" style="width:14px;height:14px;vertical-align:middle;margin-right:4px;"></i> ${el.innerText.replace(/✔|✘|x/g, "").trim()}`;
+  } else {
+    el.classList.remove("valid");
+    el.innerHTML = `<i data-lucide="x" style="width:14px;height:14px;vertical-align:middle;margin-right:4px;color:var(--accent-red);"></i> ${el.innerText.replace(/✔|✘|x/g, "").trim()}`;
+  }
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function checkPwMatch() {
+  const newPw = document.getElementById("newPassword").value;
+  const confirmPw = document.getElementById("confirmPassword").value;
+  const matchMsg = document.getElementById("pwMatchMessage");
+  const btnSubmit = document.getElementById("btnSubmitNewPw");
+  
+  const hasLength = newPw.length >= 8;
+  const hasLetter = /[A-Za-z]/.test(newPw);
+  const hasNumber = /\d/.test(newPw);
+  const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPw);
+  
+  const rulesMet = hasLength && hasLetter && hasNumber && hasSpecial;
+  
+  if (confirmPw === "") {
+    matchMsg.innerText = "";
+    btnSubmit.disabled = true;
+    return;
+  }
+  
+  if (newPw === confirmPw) {
+    if (rulesMet) {
+      matchMsg.innerText = "비밀번호가 일치하며 조건을 충족합니다.";
+      matchMsg.style.color = "var(--primary-color)";
+      btnSubmit.disabled = false;
+    } else {
+      matchMsg.innerText = "비밀번호는 일치하지만 규칙을 만족하지 못했습니다.";
+      matchMsg.style.color = "var(--accent-yellow)";
+      btnSubmit.disabled = true;
+    }
+  } else {
+    matchMsg.innerText = "비밀번호가 일치하지 않습니다.";
+    matchMsg.style.color = "var(--accent-red)";
+    btnSubmit.disabled = true;
+  }
+}
+
+async function handleChangePwSubmit(event) {
+  event.preventDefault();
+  const newPw = document.getElementById("newPassword").value;
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_users")
+      .update({ password: newPw, is_password_changed: true })
+      .eq("username", state.currentUser.username);
+      
+    if (error) {
+      alert("비밀번호 변경 중 오류가 발생했습니다. 다시 시도해 주세요.");
+      return;
+    }
+    
+    alert("비밀번호가 성공적으로 변경되었습니다.");
+    state.currentUser.password = newPw;
+    state.currentUser.is_password_changed = true;
+    completeLoginSession();
+  } catch (err) {
+    console.error("비밀번호 저장 중 오류:", err);
+  }
+}
+
+function handleLogout() {
+  if (confirm("로그아웃 하시겠습니까?")) {
+    state.currentUser = null;
+    localStorage.removeItem("yuju_logged_user");
+    document.getElementById("appScreen").style.display = "none";
+    openPublicHomepage();
+  }
+}
+
+// 7. 사이드바 메뉴 동적 렌더링
+function renderSidebarMenu() {
+  const nav = document.getElementById("sidebarMenu");
+  nav.innerHTML = "";
+  
+  const role = state.currentUser.role;
+  
+  // 전체 메뉴 풀리스트 정의
+  const allMenus = [
+    { key: "dashboard", label: "대시보드", icon: "layout-dashboard", roles: ["director", "teacher", "assistant", "student"] },
+    { key: "homepage", label: "학원 홈페이지", icon: "globe", roles: ["director", "teacher", "assistant", "student"] },
+    { key: "operations", label: "운영 관리", icon: "calendar-range", roles: ["director"] },
+    { key: "students", label: "학생 관리", icon: "users", roles: ["director", "teacher", "assistant", "student"] },
+    { key: "teachers", label: "강사 관리", icon: "graduation-cap", roles: ["director", "teacher"] },
+    { key: "enrollments", label: "수강 관리(시간표)", icon: "calendar-days", roles: ["director", "teacher", "assistant", "student"] },
+    { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant", "student"] }
+  ];
+  
+  allMenus.forEach(menu => {
+    if (menu.roles.includes(role)) {
+      const a = document.createElement("a");
+      a.className = `menu-item ${state.currentView === menu.key ? 'active' : ''}`;
+      a.innerHTML = `<i data-lucide="${menu.icon}"></i> <span>${menu.label}</span>`;
+      a.onclick = () => navigate(menu.key);
+      nav.appendChild(a);
+    }
+  });
+  
+  if (window.lucide) window.lucide.createIcons();
+}
+
+// 8. 라우팅 네비게이션
+function navigate(viewKey) {
+  state.currentView = viewKey;
+  
+  // 사이드바 활성화 갱신
+  document.querySelectorAll(".sidebar-menu .menu-item").forEach(item => {
+    item.classList.remove("active");
+  });
+  renderSidebarMenu();
+  
+  // 본문 렌더러 분기
+  switch (viewKey) {
+    case "dashboard":
+      renderDashboard();
+      break;
+    case "homepage":
+      renderHomepage();
+      break;
+    case "operations":
+      renderOperations();
+      break;
+    case "students":
+      renderStudents();
+      break;
+    case "teachers":
+      renderTeachers();
+      break;
+    case "enrollments":
+      renderEnrollments();
+      break;
+    case "progress":
+      renderProgress();
+      break;
+  }
+}
+
+// 9. 화면별 렌더러 구현
+
+// --- ① 대시보드 뷰 ---
+function renderDashboard() {
+  const container = document.getElementById("mainContent");
+  
+  // 1. 총 학생수 계산
+  const totalStudentsCount = state.students.length;
+
+  // 2. 금일 출석 대상 수 계산
+  const todayDateStr = new Date().toISOString().split("T")[0];
+  const todayEnrollments = state.enrollments.filter(e => e.date === todayDateStr);
+  const todayAttendanceTargetCount = new Set(todayEnrollments.map(e => e.studentId)).size;
+  
+  // 3. 금일 선생님 계산 (요일 매핑 기준)
+  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+  const todayDayOfWeek = dayNames[new Date().getDay()];
+  const todayScheduledTeacherIds = state.teacherSchedules
+    .filter(s => s.dayOfWeek === todayDayOfWeek)
+    .map(s => s.teacherId);
+  const uniqueTeacherIds = [...new Set(todayScheduledTeacherIds)];
+  const todayTeachers = uniqueTeacherIds.map(id => {
+    const t = state.teachers.find(teacher => teacher.id === id);
+    return t ? t.name : "";
+  }).filter(Boolean);
+  
+  const todayTeachersText = todayTeachers.length > 0 
+    ? `${todayTeachers.length}명 (${todayTeachers.join(", ")})` 
+    : "근무 강사 없음";
+
+  // 최신 공지사항 5건 선별
+  const recentNotices = [...state.notices]
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 5);
+    
+  let noticesHTML = recentNotices.map(n => `
+    <div style="padding: 14px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h4 style="font-weight: 700; color: var(--text-dark); cursor: pointer;" onclick="showNoticeDetail('${n.id}')">${escapeHTML(n.title)}</h4>
+        <span style="font-size: 11px; color: var(--text-muted);">${n.date} · 작성자: ${escapeHTML(n.author)}</span>
+      </div>
+      <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="showNoticeDetail('${n.id}')">상세보기</button>
+    </div>
+  `).join("");
+  
+  if (noticesHTML === "") {
+    noticesHTML = `<p style="padding: 20px; text-align: center; color: var(--text-muted);">등록된 공지사항이 없습니다.</p>`;
+  }
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>대시보드</h1>
+        <p>유주국어학원의 주요 알림 및 퀵링크 목록입니다.</p>
+      </div>
+      <div class="action-bar" style="display: flex; gap: 10px;">
+        ${state.currentUser.role === 'director' ? `
+          <button class="btn btn-emerald" onclick="openNewNoticeModal()"><i data-lucide="plus"></i> 공지사항 등록</button>
+        ` : ''}
+      </div>
+    </div>
+    
+    <!-- 상단 요약 통계 그리드 -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon students">
+          <i data-lucide="graduation-cap"></i>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">총 학생 수</span>
+          <span class="stat-value">${totalStudentsCount}명</span>
+          <span class="stat-subtext">등록 완료 학생</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon attendance">
+          <i data-lucide="calendar-check"></i>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">금일 출석 대상 수</span>
+          <span class="stat-value">${todayAttendanceTargetCount}명</span>
+          <span class="stat-subtext">${todayDateStr} 기준 수강 예약</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon teachers">
+          <i data-lucide="user-check"></i>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">금일 근무 선생님</span>
+          <span class="stat-value">${todayTeachersText}</span>
+          <span class="stat-subtext">요일 기본 계획 기준</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <div class="card-title">📢 최신 학원 공지사항</div>
+      <div style="border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; background: white;">
+        ${noticesHTML}
+      </div>
+    </div>
+    
+    <div class="banners-layout">
+      <!-- 공식 블로그 배너 2개 -->
+      <a href="https://blog.naver.com/tankpro11" target="_blank" class="blog-banner-card">
+        <div class="info">
+          <h3>대치리드인 유주코칭국어학원</h3>
+          <p>공식 블로그 바로가기 (네이버)</p>
+        </div>
+        <i data-lucide="arrow-up-right"></i>
+      </a>
+      
+      <a href="https://blog.naver.com/ujucoach" target="_blank" class="blog-banner-card" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+        <div class="info">
+          <h3>유주코칭&컨설팅 진학상담소</h3>
+          <p>공식 코칭 블로그 바로가기 (네이버)</p>
+        </div>
+        <i data-lucide="arrow-up-right"></i>
+      </a>
+      
+      <!-- 대학 입학처 퀵링크 -->
+      <div class="card univ-links-card">
+        <div class="card-title">🎓 주요 대학 입학처 바로가기</div>
+        <div class="univ-links-grid">
+          <a href="https://admission.snu.ac.kr" target="_blank" class="univ-link-btn">서울대학교</a>
+          <a href="https://admission.yonsei.ac.kr" target="_blank" class="univ-link-btn">연세대학교</a>
+          <a href="https://kuoas.korea.ac.kr" target="_blank" class="univ-link-btn">고려대학교</a>
+          <a href="https://admission.skku.edu" target="_blank" class="univ-link-btn">성균관대학교</a>
+          <a href="https://admission.cau.ac.kr" target="_blank" class="univ-link-btn">중앙대학교</a>
+          <a href="https://go.hanyang.ac.kr" target="_blank" class="univ-link-btn">한양대학교</a>
+          <a href="https://admission.sogang.ac.kr" target="_blank" class="univ-link-btn">서강대학교</a>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  if (window.lucide) window.lucide.createIcons();
+}
+
+// --- ①-② 홈페이지(학원 소개) 뷰 ---
+function renderHomepage() {
+  const container = document.getElementById("mainContent");
+  container.innerHTML = getHomepageHTML(false);
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function openPublicHomepage() {
+  document.getElementById("loginScreen").style.display = "none";
+  const screen = document.getElementById("publicHomepageScreen");
+  screen.style.display = "block";
+  screen.innerHTML = getHomepageHTML(true);
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function closePublicHomepage() {
+  document.getElementById("publicHomepageScreen").style.display = "none";
+  document.getElementById("loginScreen").style.display = "flex";
+  // 로그인 카드와 폼 리셋
+  document.getElementById("loginCard").style.display = "block";
+  document.getElementById("changePwCard").style.display = "none";
+  document.getElementById("loginUsername").value = "";
+  document.getElementById("loginPassword").value = "";
+}
+
+function handleHomepageContact(event) {
+  event.preventDefault();
+  const name = document.getElementById("contactName").value;
+  const phone = document.getElementById("contactPhone").value;
+  const field = document.getElementById("contactField").value;
+  
+  alert(`${name} 학생의 [${field}] 간편 상담 신청이 접수되었습니다.\n학원에서 내용을 검토한 후 입력하신 연락처(${phone})로 신속하게 안내해 드리겠습니다. 감사합니다!`);
+  event.target.reset();
+}
+
+// 모달 형태의 개별 상담 신청 기능 구현
+function openConsultationModal(field) {
+  openModal(`
+    <div class="modal-header">
+      <h3>${field === '국어/독서코칭' ? '대치리드인 국어 독서코칭' : '유주코칭 진로진학컨설팅'} 상담 신청</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form onsubmit="handleHomepageContactModal(event, '${field}')" style="display: flex; flex-direction: column; gap: 14px;">
+        <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
+          <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학생 이름</label>
+          <input type="text" id="modalContactName" placeholder="학생 이름을 입력하세요" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        </div>
+        <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
+          <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학부모 연락처</label>
+          <input type="tel" id="modalContactPhone" placeholder="연락처를 입력하세요 (예: 010-1234-5678)" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        </div>
+        <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
+          <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학교 및 학년</label>
+          <input type="text" id="modalContactGrade" placeholder="예: 대치초 4학년" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        </div>
+        <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
+          <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">문의 및 참고사항</label>
+          <textarea id="modalContactMemo" placeholder="원장님께 전달할 특별한 내용(예: 독서 수준, 학습 성향 등)을 적어주세요." style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 80px; resize: none;"></textarea>
+        </div>
+        <button type="submit" class="btn btn-emerald" style="width: 100%; padding: 12px; font-weight: 600; border:none; border-radius:var(--radius-sm); cursor:pointer; background-color: var(--primary-color); color:white; margin-top:10px;">상담 신청 완료하기</button>
+      </form>
+    </div>
+  `);
+}
+
+function handleHomepageContactModal(event, field) {
+  event.preventDefault();
+  const name = document.getElementById("modalContactName").value;
+  const phone = document.getElementById("modalContactPhone").value;
+  const grade = document.getElementById("modalContactGrade").value;
+  
+  alert(`${name} 학생(${grade})의 [${field}] 상담 신청이 성공적으로 접수되었습니다!\n원장님이 확인 후 기재해주신 연락처(${phone})로 직접 전화 드리겠습니다. 감사합니다.`);
+  closeModal();
+}
+
+function getHomepageHTML(isPublic) {
+  return `
+    ${isPublic ? `
+      <nav class="homepage-nav">
+        <div class="logo-area">
+          <i data-lucide="book-open"></i>
+          <span>유주 통합 교육원</span>
+        </div>
+        <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:600; background-color: var(--primary-color); color: white; border:none; padding:8px 16px; border-radius:var(--radius-md); cursor:pointer;">
+          <i data-lucide="shield-check"></i> 학원 관리 가기
+        </button>
+      </nav>
+    ` : ''}
+    
+    <div class="homepage-container one-screen">
+      <!-- 상단: 독서가 국어다 영웅 섹션 (compact-top) -->
+      <section class="hero-section compact-top">
+        <!-- 1열: 슬로건 -->
+        <div>
+          <h1 style="color:white; margin:0; font-family:'Noto Sans KR', sans-serif; font-size: 34px;">독서가 국어다<br>진로가 미래다</h1>
+          <p style="color:white; font-size:14.5px; margin-top:8px; line-height:1.6; opacity:0.95;">
+            대치동 최고 수준의 국어 독서 교육과 입시/진학 컨설팅이 하나로 융합되어 학생들의 올바른 자기주도 성장을 이끕니다.
+          </p>
+        </div>
+        <!-- 2열: 교육 철학 -->
+        <div style="background: rgba(255, 255, 255, 0.08); padding: 20px; border-radius: var(--radius-md); font-size: 13px; line-height: 1.7; border-left: 3px solid #f59e0b; margin: 0 10px;">
+          <strong style="color:#f59e0b; font-size: 14px;">원장 김유주의 교육 철학</strong><br>
+          "글을 읽지 못하는 학생은 공부를 잘할 수 없습니다. 대치리드인에서 독해 기초 체력을 기르고, 유주코칭의 1:1 밀착 진학 컨설팅을 결합하여 명확한 비전과 공부 근육을 디자인합니다."
+        </div>
+        <!-- 3열: 연락처 및 퀵링크 -->
+        <div style="display:flex; flex-direction:column; gap:12px; font-size:13px; opacity:0.95; padding-left: 10px;">
+          <div>
+            📞 <strong>상담 대표 번호:</strong> <a href="tel:02-555-6910" style="color:white; font-weight:700; text-decoration:underline;">02-555-6910</a><br>
+            📍 <strong>국어학원:</strong> 도곡로93길 9, 3층<br>
+            📍 <strong>상담교습소:</strong> 선릉로62길 32-1, 1층
+          </div>
+          <div style="display:flex; gap:8px;">
+            <a href="https://blog.naver.com/tankpro11" target="_blank" class="hero-btn secondary" style="padding: 8px 14px; font-size:12px; gap:4px; display:inline-flex; align-items:center;">
+              <i data-lucide="book-open" style="width:14px; height:14px;"></i> 국어 블로그
+            </a>
+            <a href="https://blog.naver.com/ujucoach" target="_blank" class="hero-btn secondary" style="padding: 8px 14px; font-size:12px; gap:4px; display:inline-flex; align-items:center;">
+              <i data-lucide="compass" style="width:14px; height:14px;"></i> 진학 블로그
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <!-- 하단: 좌우 2박스 배치 (cards-row) -->
+      <div class="cards-row">
+        <!-- 좌측 박스: 대치리드인 국어학원 -->
+        <div class="homepage-card compact-bottom left-card">
+          <div>
+            <div class="card-header">
+              <h2 style="margin:0;">대치리드인 국어학원</h2>
+              <span class="badge">독해 및 국어 전문</span>
+            </div>
+            <ul class="program-list">
+              <li><i data-lucide="check-circle-2"></i> <strong>특허받은 수준별 맞춤 독서 코칭</strong></li>
+              <li><i data-lucide="check-circle-2"></i> 초등 / 중등 독서독해 체계적 훈련</li>
+              <li><i data-lucide="check-circle-2"></i> 고등 국어 내신 및 수능 완벽 대비</li>
+              <li><i data-lucide="check-circle-2"></i> 글쓰기 트레이닝 (논술 및 수행평가)</li>
+              <li><i data-lucide="check-circle-2"></i> 비문학 구조 독해 및 문학 작품 강독</li>
+            </ul>
+          </div>
+          <div>
+            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="width: 100%; padding: 14px; font-weight: 700; font-size:15px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--primary-color); color: white; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <i data-lucide="calendar"></i> 대치리드인 상담 신청하기
+            </button>
+            <div class="card-footer">
+              특징: 리드인 독서진단검사를 통해 학생의 읽기 능력을 정확하게 진단하고, 개인의 레벨에 맞는 도서 선정 및 전담 강사의 1:1 밀착 피드백을 제공합니다.
+            </div>
+          </div>
+        </div>
+
+        <!-- 우측 박스: 유주코칭 진학상담소 -->
+        <div class="homepage-card compact-bottom right-card">
+          <div>
+            <div class="card-header">
+              <h2 style="margin:0;">유주코칭 진학상담소</h2>
+              <span class="badge">진로 및 진학 컨설팅</span>
+            </div>
+            <ul class="program-list">
+              <li><i data-lucide="check-circle-2"></i> <strong>1:1 학습유형 분석 및 진로 설계</strong></li>
+              <li><i data-lucide="check-circle-2"></i> 개인 성향에 맞춘 자기주도학습 코칭</li>
+              <li><i data-lucide="check-circle-2"></i> 중/고등부 생활기록부 및 수행평가 관리</li>
+              <li><i data-lucide="check-circle-2"></i> 대입 전략 수시/정시 원서 접수 지도</li>
+              <li><i data-lucide="check-circle-2"></i> 학습 의욕 고취 및 메타인지 강화</li>
+            </ul>
+          </div>
+          <div>
+            <button class="btn btn-emerald" onclick="openConsultationModal('진로진학컨설팅')" style="width: 100%; padding: 14px; font-weight: 700; font-size:15px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: #3b82f6; color: white; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <i data-lucide="calendar"></i> 유주코칭 상담 신청하기
+            </button>
+            <div class="card-footer">
+              특징: 학생의 학습 유형과 다면적 능력을 분석하여 본인의 비전과 로드맵을 설계하고, 장기적인 대입 전략부터 오늘의 공부 습관까지 빈틈없이 코칭합니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+window.openPublicHomepage = openPublicHomepage;
+window.closePublicHomepage = closePublicHomepage;
+window.handleHomepageContact = handleHomepageContact;
+
+function showNoticeDetail(noticeId) {
+  const notice = state.notices.find(n => n.id === noticeId);
+  if (!notice) return;
+  
+  openModal(`
+    <div class="modal-header">
+      <h3>${escapeHTML(notice.title)}</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="line-height: 1.8;">
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom: 16px;">
+        작성일자: ${notice.date} | 작성자: ${escapeHTML(notice.author)}
+      </div>
+      <p style="white-space: pre-wrap; font-size:14px; color:var(--text-dark);">${escapeHTML(notice.content)}</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal()">닫기</button>
+    </div>
+  `);
+}
+
+function openNewNoticeModal() {
+  openModal(`
+    <div class="modal-header">
+      <h3>공지사항 등록</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="newNoticeForm" onsubmit="handleNewNotice(event)">
+        <div class="form-group">
+          <label for="noticeTitle">공지 제목</label>
+          <input type="text" id="noticeTitle" required>
+        </div>
+        <div class="form-group">
+          <label for="noticeContent">공지 내용</label>
+          <textarea id="noticeContent" style="width:100%; height:160px; border:1px solid var(--border-color); border-radius:var(--radius-md); padding:10px; outline:none; font-family:inherit;" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-emerald" style="width:100%; justify-content:center;">등록하기</button>
+      </form>
+    </div>
+  `);
+}
+
+async function handleNewNotice(event) {
+  event.preventDefault();
+  const title = document.getElementById("noticeTitle").value.trim();
+  const content = document.getElementById("noticeContent").value.trim();
+  
+  const newNotice = {
+    id: `nt-${Date.now()}`,
+    title,
+    content,
+    date: new Date().toISOString().split("T")[0],
+    author: state.currentUser.username
+  };
+  
+  try {
+    const { error } = await supabaseClient.from("agy_notices").insert([{ id: newNotice.id, data: newNotice }]);
+    if (!error) {
+      state.notices.push(newNotice);
+      closeModal();
+      renderDashboard();
+    } else {
+      alert("공지 등록 실패");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// --- ② 운영 관리 뷰 (원장 전용) ---
+let opsYearMonth = "2026-07"; // 기본 연월
+
+function renderOperations() {
+  const container = document.getElementById("mainContent");
+  
+  // 현재 설정된 연월의 캘린더 데이터 조회
+  const monthData = state.monthlyOperations[opsYearMonth] || {};
+  
+  const [year, month] = opsYearMonth.split("-").map(Number);
+  const firstDayIndex = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  
+  let cellsHTML = "";
+  
+  // 빈 셀 채우기
+  for (let i = 0; i < firstDayIndex; i++) {
+    cellsHTML += `<div class="calendar-cell inactive"></div>`;
+  }
+  
+  // 일자 채우기
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
+    const dayConfig = monthData[dateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
+    
+    const holidayClass = dayConfig.isHoliday ? "closed holiday" : "operating";
+    const statusText = dayConfig.isHoliday ? "휴무일" : `${dayConfig.start}~${dayConfig.end}`;
+    
+    cellsHTML += `
+      <div class="calendar-cell ${holidayClass}" onclick="openEditDayConfigModal('${dateStr}')">
+        <span class="day-num">${d}</span>
+        <span class="cell-status">${statusText}</span>
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>학원 운영 관리</h1>
+        <p>선택하신 월의 가동 시간 및 휴무일을 날짜별로 구성합니다. (수강 신청 시 이 운영시간이 자동 반영됩니다.)</p>
+      </div>
+      <div class="action-bar">
+        <select id="opsMonthSelector" onchange="changeOpsMonth(this.value)" style="padding:10px 14px; border-radius:var(--radius-md); border:1px solid var(--border-color); font-weight:700;">
+          <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
+          <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
+          <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
+        </select>
+        <button class="btn btn-secondary" onclick="applyWeeklyTemplate()"><i data-lucide="copy"></i> 주간 일정 템플릿 일괄 적용</button>
+        <button class="btn btn-emerald" onclick="saveOperationsConfig()"><i data-lucide="save"></i> 변경 완료 확정 저장</button>
+      </div>
+    </div>
+    
+    <div class="card">
+      <div class="calendar-header">
+        <h2 style="font-weight:800; font-size:20px;">🗓 ${year}년 ${month}월 운영 일정표</h2>
+        <span style="font-size:12px; color:var(--text-muted);">* 각 날짜를 클릭하면 해당 일자의 휴무 여부 및 운영시간을 자유롭게 개별 수정할 수 있습니다.</span>
+      </div>
+      <div class="calendar-grid">
+        <div class="calendar-day-label" style="color:var(--accent-red);">일</div>
+        <div class="calendar-day-label">월</div>
+        <div class="calendar-day-label">화</div>
+        <div class="calendar-day-label">수</div>
+        <div class="calendar-day-label">목</div>
+        <div class="calendar-day-label">금</div>
+        <div class="calendar-day-label">토</div>
+        ${cellsHTML}
+      </div>
+    </div>
+  `;
+  
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function changeOpsMonth(ym) {
+  opsYearMonth = ym;
+  renderOperations();
+}
+
+// 개별 날짜 운영시간 수정 모달
+function openEditDayConfigModal(dateStr) {
+  if (!state.monthlyOperations[opsYearMonth]) {
+    state.monthlyOperations[opsYearMonth] = {};
+  }
+  
+  const current = state.monthlyOperations[opsYearMonth][dateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
+  
+  openModal(`
+    <div class="modal-header">
+      <h3>일정 개별 구성 (${dateStr})</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>일자 상태</label>
+        <select id="editDayHoliday" onchange="toggleEditDayTimes(this.value)">
+          <option value="false" ${!current.isHoliday ? 'selected' : ''}>학원 가동일 (운영)</option>
+          <option value="true" ${current.isHoliday ? 'selected' : ''}>학원 휴무일 (휴일)</option>
+        </select>
+      </div>
+      
+      <div id="editDayTimeFields" style="display: ${current.isHoliday ? 'none' : 'block'};">
+        <div style="display:flex; gap:12px;">
+          <div class="form-group" style="flex:1;">
+            <label>시작 시간</label>
+            <input type="time" id="editDayStart" value="${current.start}">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>종료 시간</label>
+            <input type="time" id="editDayEnd" value="${current.end}">
+          </div>
+        </div>
+      </div>
+      
+      <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:20px;" onclick="confirmIndividualDayConfig('${dateStr}')">설정 임시 저장</button>
+    </div>
+  `);
+}
+
+function toggleEditDayTimes(isHolidayStr) {
+  const fields = document.getElementById("editDayTimeFields");
+  fields.style.display = isHolidayStr === "true" ? "none" : "block";
+}
+
+function confirmIndividualDayConfig(dateStr) {
+  const isHoliday = document.getElementById("editDayHoliday").value === "true";
+  const start = document.getElementById("editDayStart").value;
+  const end = document.getElementById("editDayEnd").value;
+  
+  if (!state.monthlyOperations[opsYearMonth]) {
+    state.monthlyOperations[opsYearMonth] = {};
+  }
+  
+  state.monthlyOperations[opsYearMonth][dateStr] = { isHoliday, start, end };
+  closeModal();
+  renderOperations();
+}
+
+// 주간 일정이 반복되므로, 용이하게 입력하기 위한 [주간 템플릿 일괄 적용] 기능
+function applyWeeklyTemplate() {
+  openModal(`
+    <div class="modal-header">
+      <h3>주간 반복 템플릿 적용</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+        설정하신 요일별 기본 값을 기준으로 ${opsYearMonth}의 전체 요일에 가동 여부 및 운영시간을 일괄 덮어씌웁니다.
+      </p>
+      
+      <!-- 일요일 ~ 토요일 설정 -->
+      ${["일", "월", "화", "수", "목", "금", "토"].map((day, idx) => `
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+          <span style="font-weight:700; width:50px;">${day}요일</span>
+          <select id="tplActive_${idx}" onchange="toggleTplRow(${idx}, this.value)" style="width:100px; padding:6px;">
+            <option value="true" ${idx !== 0 ? 'selected' : ''}>가동</option>
+            <option value="false" ${idx === 0 ? 'selected' : ''}>휴무</option>
+          </select>
+          <div id="tplTimes_${idx}" style="display: ${idx !== 0 ? 'flex' : 'none'}; gap:6px; align-items:center;">
+            <input type="time" id="tplStart_${idx}" value="13:00" style="padding:4px;">
+            <span>~</span>
+            <input type="time" id="tplEnd_${idx}" value="22:00" style="padding:4px;">
+          </div>
+        </div>
+      `).join("")}
+      
+      <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:20px;" onclick="confirmWeeklyTemplate()">주간 템플릿 적용하기</button>
+    </div>
+  `);
+}
+
+function toggleTplRow(idx, activeStr) {
+  document.getElementById(`tplTimes_${idx}`).style.display = activeStr === "true" ? "flex" : "none";
+}
+
+function confirmWeeklyTemplate() {
+  const [year, month] = opsYearMonth.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  
+  if (!state.monthlyOperations[opsYearMonth]) {
+    state.monthlyOperations[opsYearMonth] = {};
+  }
+  
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
+    const dayOfWeek = new Date(dateStr).getDay(); // 0~6
+    
+    const isHoliday = document.getElementById(`tplActive_${dayOfWeek}`).value === "false";
+    const start = document.getElementById(`tplStart_${dayOfWeek}`).value;
+    const end = document.getElementById(`tplEnd_${dayOfWeek}`).value;
+    
+    state.monthlyOperations[opsYearMonth][dateStr] = { isHoliday, start, end };
+  }
+  
+  closeModal();
+  renderOperations();
+  alert("주간 반복 템플릿이 임시 적용되었습니다. 상단의 [변경 완료 확정 저장]을 클릭해야 실제 원격 데이터베이스에 저장됩니다.");
+}
+
+// 원격 DB 저장
+async function saveOperationsConfig() {
+  const configs = state.monthlyOperations[opsYearMonth];
+  if (!configs) return;
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_monthly_operations")
+      .upsert([{ year_month: opsYearMonth, configs }]);
+      
+    if (!error) {
+      alert("운영 일정 및 가동 시간 설정이 DB에 성공적으로 저장(확정)되었습니다.");
+      await loadAllData();
+      renderOperations();
+    } else {
+      alert("저장 실패");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// --- ③ 학생 관리 뷰 ---
+let studentTab = "list"; // list: 등록관리, attendance: 출결관리
+
+function renderStudents() {
+  const container = document.getElementById("mainContent");
+  
+  let headerAction = "";
+  if (studentTab === "list" && (state.currentUser.role === 'director' || state.currentUser.role === 'assistant')) {
+    headerAction = `<button class="btn btn-emerald" onclick="openNewStudentModal()"><i data-lucide="user-plus"></i> 신규 학생 등록</button>`;
+  }
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>학생 관리</h1>
+        <p>학원생들의 인적사항 등록 및 출결 관리를 진행합니다.</p>
+      </div>
+      <div class="action-bar">
+        ${headerAction}
+      </div>
+    </div>
+    
+    <div class="tabs-navigation">
+      <button class="tab-btn ${studentTab === 'list' ? 'active' : ''}" onclick="toggleStudentTab('list')">👤 등록 관리</button>
+      <button class="tab-btn ${studentTab === 'attendance' ? 'active' : ''}" onclick="toggleStudentTab('attendance')">✅ 출결 관리</button>
+    </div>
+    
+    <div id="studentTabContent"></div>
+  `;
+  
+  if (window.lucide) window.lucide.createIcons();
+  
+  if (studentTab === "list") {
+    renderStudentList();
+  } else {
+    renderStudentAttendance();
+  }
+}
+
+function toggleStudentTab(tab) {
+  studentTab = tab;
+  renderStudents();
+}
+
+// 등록관리 리스트
+function renderStudentList() {
+  const target = document.getElementById("studentTabContent");
+  
+  // 학생 조회 권한 제어: 학생/학부모는 자신만 보여야 함
+  let visibleStudents = state.students;
+  if (state.currentUser.role === 'student') {
+    visibleStudents = state.students.filter(s => s.id === state.currentUser.ref_id);
+  }
+
+  let tableRows = visibleStudents.map(s => {
+    // 3개월 미만 신규 가입 학생 체크 (Bold 및 Emerald 초록색 표시용)
+    const isNew = isStudentNew(s.registeredDate);
+    const highlightClass = isNew ? "new-student-highlight" : "";
+    
+    return `
+      <tr>
+        <td class="${highlightClass}">${escapeHTML(s.name)}</td>
+        <td>${escapeHTML(s.school)} (학년: ${s.grade})</td>
+        <td>${escapeHTML(s.gender)}</td>
+        <td>${s.birthday || "-"}</td>
+        <td>${s.studentPhone || "-"}</td>
+        <td>${s.parentPhone1 || "-"}</td>
+        <td>
+          <div style="font-size:11px; line-height:1.3;">
+            <div>등록: ${s.registeredDate || "-"}</div>
+            ${s.leaveDate ? `<div style="color:var(--accent-yellow)">휴원: ${s.leaveDate}</div>` : ''}
+            ${s.reregisteredDate ? `<div style="color:var(--primary-color)">재등록: ${s.reregisteredDate}</div>` : ''}
+            ${s.dischargeDate ? `<div style="color:var(--accent-red)">퇴원: ${s.dischargeDate}</div>` : ''}
+          </div>
+        </td>
+        <td>
+          ${state.currentUser.role === 'director' || state.currentUser.role === 'assistant' ? `
+            <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="openEditStudentModal('${s.id}')">수정</button>
+          ` : `<span style="font-size:12px; color:var(--text-muted);">조회전용</span>`}
+        </td>
+      </tr>
+    `;
+  }).join("");
+  
+  if (tableRows === "") {
+    tableRows = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">표시할 학생 정보가 없습니다.</td></tr>`;
+  }
+
+  target.innerHTML = `
+    <div class="card">
+      <div class="card-title">학원생 인적사항 관리</div>
+      <div class="table-responsive">
+        <table class="yuju-table">
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>학교/학년</th>
+              <th>성별</th>
+              <th>생년월일</th>
+              <th>학생 연락처</th>
+              <th>학부모 연락처</th>
+              <th>학원 등록 상태</th>
+              <th>작업</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// 3개월(90일) 미만 학생 판별 헬퍼
+function isStudentNew(regDateStr) {
+  if (!regDateStr) return false;
+  const regDate = new Date(regDateStr);
+  const today = new Date(state.selectedDate); // 시뮬레이션 기준일 대비
+  const diffTime = Math.abs(today - regDate);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays <= 90;
+}
+
+// 학생 등록 모달
+function openNewStudentModal() {
+  openModal(`
+    <div class="modal-header">
+      <h3>신규 학생 등록</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="max-height:500px; overflow-y:auto;">
+      <form id="newStudentForm" onsubmit="handleNewStudent(event)">
+        <div class="form-group">
+          <label>이름</label>
+          <input type="text" id="stName" required>
+        </div>
+        <div class="form-group">
+          <label>학교</label>
+          <input type="text" id="stSchool" required>
+        </div>
+        <div class="form-group">
+          <label>학년</label>
+          <select id="stGrade" required>
+            <option value="1">초등 1학년</option>
+            <option value="2">초등 2학년</option>
+            <option value="3">초등 3학년</option>
+            <option value="4">초등 4학년</option>
+            <option value="5">초등 5학년</option>
+            <option value="6">초등 6학년</option>
+            <option value="중1">중등 1학년</option>
+            <option value="중2">중등 2학년</option>
+            <option value="중3">중등 3학년</option>
+            <option value="고1">고등 1학년</option>
+            <option value="고2">고등 2학년</option>
+            <option value="고3">고등 3학년</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>성별</label>
+          <select id="stGender">
+            <option value="남">남</option>
+            <option value="여">여</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>생일</label>
+          <input type="date" id="stBirthday" required>
+        </div>
+        <div class="form-group">
+          <label>학생 연락처</label>
+          <input type="text" id="stPhone" placeholder="010-0000-0000">
+        </div>
+        <div class="form-group">
+          <label>학부모 연락처 1 (대표)</label>
+          <input type="text" id="stParent1" placeholder="010-0000-0000" required>
+        </div>
+        <div class="form-group">
+          <label>학부모 연락처 2</label>
+          <input type="text" id="stParent2" placeholder="010-0000-0000">
+        </div>
+        
+        <div style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">
+          <h4>📅 학원 상태별 일자 관리 (년월일 필수)</h4>
+          <div class="form-group">
+            <label>등록일자</label>
+            <input type="date" id="stRegDate" required>
+          </div>
+          <div class="form-group">
+            <label>휴원일자</label>
+            <input type="date" id="stLeaveDate">
+          </div>
+          <div class="form-group">
+            <label>재등록일자</label>
+            <input type="date" id="stReregDate">
+          </div>
+          <div class="form-group">
+            <label>퇴원일자</label>
+            <input type="date" id="stDischargeDate">
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">
+          <h4>🎯 진로 희망사항 (각 비고칸 최대 20자 제한)</h4>
+          <div class="form-group">
+            <label>진로 비고 1</label>
+            <input type="text" id="stCareer1" maxlength="20" placeholder="20자 이하">
+          </div>
+          <div class="form-group">
+            <label>진로 비고 2</label>
+            <input type="text" id="stCareer2" maxlength="20" placeholder="20자 이하">
+          </div>
+          <div class="form-group">
+            <label>진로 비고 3</label>
+            <input type="text" id="stCareer3" maxlength="20" placeholder="20자 이하">
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">
+          <div class="form-group">
+            <label>특이사항 비고 (최대 20자 제한)</label>
+            <input type="text" id="stMemo" maxlength="20" placeholder="20자 이하">
+          </div>
+        </div>
+        
+        <button type="submit" class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:16px;">등록 확정</button>
+      </form>
+    </div>
+  `);
+  // 등록일 기본값 지정
+  document.getElementById("stRegDate").value = state.selectedDate;
+}
+
+async function handleNewStudent(event) {
+  event.preventDefault();
+  const name = document.getElementById("stName").value.trim();
+  const id = `st-${Date.now()}`;
+  
+  const studentData = {
+    id,
+    name,
+    school: document.getElementById("stSchool").value,
+    grade: document.getElementById("stGrade").value,
+    gender: document.getElementById("stGender").value,
+    birthday: document.getElementById("stBirthday").value,
+    studentPhone: document.getElementById("stPhone").value,
+    parentPhone1: document.getElementById("stParent1").value,
+    parentPhone2: document.getElementById("stParent2").value,
+    registeredDate: document.getElementById("stRegDate").value,
+    leaveDate: document.getElementById("stLeaveDate").value,
+    reregisteredDate: document.getElementById("stReregDate").value,
+    dischargeDate: document.getElementById("stDischargeDate").value,
+    careers: [
+      document.getElementById("stCareer1").value.trim(),
+      document.getElementById("stCareer2").value.trim(),
+      document.getElementById("stCareer3").value.trim()
+    ],
+    memo: document.getElementById("stMemo").value.trim()
+  };
+  
+  try {
+    // 1. 학생 인적사항 삽입
+    await supabaseClient.from("agy_students").insert([{ id, data: studentData }]);
+    
+    // 2. 로그인 계정 자동 생성 (비밀번호 1234 디폴트)
+    const userRow = {
+      username: name,
+      password: "1234",
+      role: "student",
+      is_password_changed: false,
+      ref_id: id
+    };
+    await supabaseClient.from("agy_users").insert([userRow]);
+    
+    alert(`${name} 학생 등록 및 로그인 계정이 생성되었습니다. (초기 비밀번호: 1234)`);
+    await loadAllData();
+    closeModal();
+    renderStudentList();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// 학생 인적사항 수정 모달
+function openEditStudentModal(studentId) {
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) return;
+  
+  openModal(`
+    <div class="modal-header">
+      <h3>학생 정보 수정 (${escapeHTML(student.name)})</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="max-height:500px; overflow-y:auto;">
+      <form id="editStudentForm" onsubmit="handleEditStudent(event, '${studentId}')">
+        <div class="form-group">
+          <label>학교</label>
+          <input type="text" id="editSchool" value="${escapeHTML(student.school)}" required>
+        </div>
+        <div class="form-group">
+          <label>학년</label>
+          <select id="editGrade" required>
+            <option value="1" ${student.grade === '1' ? 'selected' : ''}>초등 1학년</option>
+            <option value="2" ${student.grade === '2' ? 'selected' : ''}>초등 2학년</option>
+            <option value="3" ${student.grade === '3' ? 'selected' : ''}>초등 3학년</option>
+            <option value="4" ${student.grade === '4' ? 'selected' : ''}>초등 4학년</option>
+            <option value="5" ${student.grade === '5' ? 'selected' : ''}>초등 5학년</option>
+            <option value="6" ${student.grade === '6' ? 'selected' : ''}>초등 6학년</option>
+            <option value="중1" ${student.grade === '중1' ? 'selected' : ''}>중등 1학년</option>
+            <option value="중2" ${student.grade === '중2' ? 'selected' : ''}>중등 2학년</option>
+            <option value="중3" ${student.grade === '중3' ? 'selected' : ''}>중등 3학년</option>
+            <option value="고1" ${student.grade === '고1' ? 'selected' : ''}>고등 1학년</option>
+            <option value="고2" ${student.grade === '고2' ? 'selected' : ''}>고등 2학년</option>
+            <option value="고3" ${student.grade === '고3' ? 'selected' : ''}>고등 3학년</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>생년월일</label>
+          <input type="date" id="editBirthday" value="${student.birthday}">
+        </div>
+        <div class="form-group">
+          <label>학생 연락처</label>
+          <input type="text" id="editPhone" value="${escapeHTML(student.studentPhone || '')}">
+        </div>
+        <div class="form-group">
+          <label>학부모 연락처 1</label>
+          <input type="text" id="editParent1" value="${escapeHTML(student.parentPhone1 || '')}" required>
+        </div>
+        <div class="form-group">
+          <label>학부모 연락처 2</label>
+          <input type="text" id="editParent2" value="${escapeHTML(student.parentPhone2 || '')}">
+        </div>
+        
+        <div style="border-top:1px solid var(--border-color); padding-top:16px; margin-top:16px;">
+          <h4>일자 및 상태 상세</h4>
+          <div class="form-group">
+            <label>등록일자</label>
+            <input type="date" id="editRegDate" value="${student.registeredDate}">
+          </div>
+          <div class="form-group">
+            <label>휴원일자</label>
+            <input type="date" id="editLeaveDate" value="${student.leaveDate || ''}">
+          </div>
+          <div class="form-group">
+            <label>재등록일자</label>
+            <input type="date" id="editReregDate" value="${student.reregisteredDate || ''}">
+          </div>
+          <div class="form-group">
+            <label>퇴원일자</label>
+            <input type="date" id="editDischargeDate" value="${student.dischargeDate || ''}">
+          </div>
+        </div>
+        
+        <div style="border-top:1px solid var(--border-color); padding-top:16px; margin-top:16px;">
+          <h4>진로 희망사항 (비고칸 최대 20자)</h4>
+          <input type="text" id="editCareer1" value="${escapeHTML(student.careers?.[0] || '')}" maxlength="20" style="margin-bottom:8px;" placeholder="희망 1">
+          <input type="text" id="editCareer2" value="${escapeHTML(student.careers?.[1] || '')}" maxlength="20" style="margin-bottom:8px;" placeholder="희망 2">
+          <input type="text" id="editCareer3" value="${escapeHTML(student.careers?.[2] || '')}" maxlength="20" placeholder="희망 3">
+        </div>
+        
+        <div style="border-top:1px solid var(--border-color); padding-top:16px; margin-top:16px;">
+          <div class="form-group">
+            <label>특이사항 비고 (최대 20자)</label>
+            <input type="text" id="editMemo" value="${escapeHTML(student.memo || '')}" maxlength="20">
+          </div>
+        </div>
+        
+        <button type="submit" class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:16px;">수정 저장</button>
+      </form>
+    </div>
+  `);
+}
+
+async function handleEditStudent(event, studentId) {
+  event.preventDefault();
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) return;
+  
+  const updatedData = {
+    ...student,
+    school: document.getElementById("editSchool").value,
+    grade: document.getElementById("editGrade").value,
+    birthday: document.getElementById("editBirthday").value,
+    studentPhone: document.getElementById("editPhone").value,
+    parentPhone1: document.getElementById("editParent1").value,
+    parentPhone2: document.getElementById("editParent2").value,
+    registeredDate: document.getElementById("editRegDate").value,
+    leaveDate: document.getElementById("editLeaveDate").value,
+    reregisteredDate: document.getElementById("editReregDate").value,
+    dischargeDate: document.getElementById("editDischargeDate").value,
+    careers: [
+      document.getElementById("editCareer1").value.trim(),
+      document.getElementById("editCareer2").value.trim(),
+      document.getElementById("editCareer3").value.trim()
+    ],
+    memo: document.getElementById("editMemo").value.trim()
+  };
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_students")
+      .update({ data: updatedData })
+      .eq("id", studentId);
+      
+    if (!error) {
+      alert("학생 정보가 수정되었습니다.");
+      await loadAllData();
+      closeModal();
+      renderStudentList();
+    } else {
+      alert("수정 실패");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// 출결 관리 화면
+function renderStudentAttendance() {
+  const target = document.getElementById("studentTabContent");
+  
+  // 시뮬레이션일(selectedDate) 기준 수강 신청이 되어있는 학생 목록 추출
+  // agy_enrollments 에서 요일과 매칭되는 데이터 찾기
+  const dateObj = new Date(state.selectedDate);
+  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+  const selectedDayName = dayNames[dateObj.getDay()];
+  
+  // 학생들의 수강 신청 스케줄
+  const activeSchedules = state.enrollments.filter(e => e.date === state.selectedDate);
+  
+  let attendanceRows = activeSchedules.map(sch => {
+    const st = state.students.find(s => s.id === sch.studentId);
+    if (!st) return "";
+    
+    // 출결 기록이 있는지 조회
+    let record = state.attendance.find(a => a.studentId === sch.studentId && a.date === state.selectedDate);
+    
+    // 없으면 기본 레코드 상태 생성
+    const plannedIn = sch.startTime;
+    const plannedOut = sch.endTime;
+    const actualIn = record ? record.actualIn : plannedIn;
+    const actualOut = record ? record.actualOut : plannedOut;
+    const isConfirmed = record ? record.isConfirmed : false;
+    
+    // 실제 근무/출석 시간 계산
+    const actualDuration = record && record.isConfirmed ? calculateMinutes(actualIn, actualOut) : 0;
+    
+    return `
+      <tr>
+        <td><strong>${escapeHTML(st.name)}</strong></td>
+        <td>${plannedIn} ~ ${plannedOut}</td>
+        <td>
+          <input type="time" id="actIn_${sch.studentId}" value="${actualIn}" ${isConfirmed ? 'disabled' : ''} style="padding:4px;">
+        </td>
+        <td>
+          <input type="time" id="actOut_${sch.studentId}" value="${actualOut}" ${isConfirmed ? 'disabled' : ''} style="padding:4px;">
+        </td>
+        <td>
+          <strong>${isConfirmed ? `${actualDuration}분` : '-'}</strong>
+        </td>
+        <td>
+          ${isConfirmed 
+            ? `<span class="badge badge-emerald">확정 완료</span>` 
+            : `<button class="btn btn-emerald" style="padding:4px 10px; font-size:11px;" onclick="confirmAttendance('${sch.studentId}', '${plannedIn}', '${plannedOut}')">확정</button>`
+          }
+        </td>
+      </tr>
+    `;
+  }).join("");
+  
+  if (attendanceRows === "") {
+    attendanceRows = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">금일 등원 일정으로 수강이 신청된 학생이 없습니다.</td></tr>`;
+  }
+
+  target.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div>
+        <strong>📅 출결 기준일자 선택:</strong>
+        <input type="date" id="attendanceDate" value="${state.selectedDate}" onchange="changeAttendanceDate(this.value)" style="padding:6px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+      </div>
+      
+      <!-- 등록하지 않은 날에 출석하는 학생 수동 긴급 추가 버튼 -->
+      <div>
+        <button class="btn btn-secondary" onclick="openAddExtraAttendanceModal()"><i data-lucide="plus-circle"></i> 비등록 등원생 추가</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">${state.selectedDate} 학생 출결 상태 일치 점검표</div>
+      <div class="table-responsive">
+        <table class="yuju-table">
+          <thead>
+            <tr>
+              <th>학생명</th>
+              <th>계획 시간</th>
+              <th>실제 등원시간</th>
+              <th>실제 하원시간</th>
+              <th>실제 수강시간</th>
+              <th>출결 확정</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${attendanceRows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function changeAttendanceDate(d) {
+  state.selectedDate = d;
+  renderStudentAttendance();
+}
+
+// 수강/출결 시간 계산 헬퍼 (분 단위)
+function calculateMinutes(start, end) {
   if (!start || !end) return 0;
   const [sH, sM] = start.split(":").map(Number);
   const [eH, eM] = end.split(":").map(Number);
@@ -273,2513 +1666,1498 @@ function calculateDuration(start, end) {
   return diff > 0 ? diff : 0;
 }
 
-function isNewStudent(registeredDate) {
-  if (!registeredDate) return false;
-  const reg = new Date(registeredDate);
-  const base = new Date(state.selectedDate);
-  const diffTime = Math.abs(base - reg);
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  return diffDays < 90; // 3개월 미만 (90일)
-}
-
-function generateTimeOptions(start = "08:00", end = "22:00") {
-  const options = [];
-  let [sH, sM] = start.split(":").map(Number);
-  const [eH, eM] = end.split(":").map(Number);
-  const endLimit = eH * 60 + eM;
+// 출결 사항 DB 확정 및 저장
+async function confirmAttendance(studentId, planIn, planOut) {
+  const actIn = document.getElementById(`actIn_${studentId}`).value;
+  const actOut = document.getElementById(`actOut_${studentId}`).value;
   
-  let current = sH * 60 + sM;
-  while (current <= endLimit) {
-    const h = String(Math.floor(current / 60)).padStart(2, '0');
-    const m = String(current % 60).padStart(2, '0');
-    options.push(`${h}:${m}`);
-    current += 10; // 10분 단위
-  }
-  return options;
-}
-
-// 4. 이벤트 바인딩 및 라우팅 설정
-document.addEventListener("DOMContentLoaded", async () => {
-  await loadStateFromStorage();
-  setupRoleSwitcher();
-  renderSidebar();
-  navigate(state.currentView);
-});
-
-function setupRoleSwitcher() {
-  const switcher = document.getElementById("roleSwitcher");
-  switcher.addEventListener("click", (e) => {
-    if (e.target.classList.contains("role-btn")) {
-      document.querySelectorAll(".role-btn").forEach(btn => btn.classList.remove("active"));
-      e.target.classList.add("active");
-      
-      const newRole = e.target.dataset.role;
-      state.currentRole = newRole;
-      
-      // 역할 전환 시 기본 접속 아이디 세팅
-      if (newRole === "student" && state.students.length > 0) {
-        state.selectedStudentId = state.students[0].id;
-      }
-      if (newRole === "teacher" && state.teachers.length > 0) {
-        state.selectedTeacherId = state.teachers[0].id;
-      }
-      
-      renderSidebar();
-      
-      // 해당 역할에 권한이 없는 뷰일 경우 대시보드로 이동
-      const allowedViews = getAllowedViews(newRole);
-      if (!allowedViews.includes(state.currentView)) {
-        navigate("dashboard");
-      } else {
-        navigate(state.currentView);
-      }
-    }
-  });
-}
-
-function getAllowedViews(role) {
-  switch (role) {
-    case "director":
-      return ["dashboard", "studentManage", "teacherManage", "timetable", "progress"];
-    case "teacher":
-      return ["dashboard", "teacherManage", "timetable", "progress"];
-    case "assistant":
-      return ["dashboard", "studentManage", "timetable", "progress"];
-    case "student":
-      return ["dashboard", "timetable", "progress"];
-    default:
-      return ["dashboard"];
-  }
-}
-
-function renderSidebar() {
-  const sidebar = document.getElementById("sidebar");
-  const allowed = getAllowedViews(state.currentRole);
-  
-  let html = `<div style="padding: 0 1rem 1rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1rem;">`;
-  
-  // 로그인한 시뮬레이션 대상 선택창 제공
-  if (state.currentRole === "student") {
-    html += `
-      <label>학생 선택</label>
-      <select id="userStudentSelect" onchange="changeSimulatedUser('student', this.value)">
-        ${state.students.map(s => `<option value="${s.id}" ${s.id === state.selectedStudentId ? "selected" : ""}>${s.name} (${s.school})</option>`).join("")}
-      </select>
-    `;
-  } else if (state.currentRole === "teacher") {
-    html += `
-      <label>강사 선택</label>
-      <select id="userTeacherSelect" onchange="changeSimulatedUser('teacher', this.value)">
-        ${state.teachers.map(t => `<option value="${t.id}" ${t.id === state.selectedTeacherId ? "selected" : ""}>${t.name} 강사</option>`).join("")}
-      </select>
-    `;
-  } else if (state.currentRole === "director") {
-    html += `<span class="status-pill success">원장님 환영합니다</span>`;
-  } else if (state.currentRole === "assistant") {
-    html += `<span class="status-pill warning">조교 모드 작동중</span>`;
-  }
-  
-  html += `
-    <div style="margin-top: 1rem;">
-      <label>시뮬레이션 기준일</label>
-      <input type="date" value="${state.selectedDate}" onchange="changeSimulatedDate(this.value)">
-    </div>
-  </div>`;
-
-  const menus = [
-    { id: "dashboard", label: "대시보드 / 공지", icon: "home" },
-    { id: "studentManage", label: "학생 / 출결관리", icon: "users" },
-    { id: "teacherManage", label: "강사 / 근무관리", icon: "briefcase" },
-    { id: "timetable", label: "수강 / 시간표관리", icon: "calendar" },
-    { id: "progress", label: "당일 진도관리", icon: "clipboard-list" }
-  ];
-
-  menus.forEach(m => {
-    if (allowed.includes(m.id)) {
-      html += `
-        <button class="nav-item ${state.currentView === m.id ? 'active' : ''}" onclick="navigate('${m.id}')">
-          <i data-lucide="${m.icon}"></i>
-          <span>${m.label}</span>
-        </button>
-      `;
-    }
-  });
-
-  sidebar.innerHTML = html;
-  lucide.createIcons();
-}
-
-function changeSimulatedUser(type, val) {
-  if (type === "student") state.selectedStudentId = val;
-  if (type === "teacher") state.selectedTeacherId = val;
-  saveStateToStorage();
-  navigate(state.currentView);
-}
-
-function changeSimulatedDate(val) {
-  state.selectedDate = val;
-  saveStateToStorage();
-  renderSidebar();
-  navigate(state.currentView);
-}
-
-function navigate(viewId) {
-  state.currentView = viewId;
-  document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
-  const activeNav = document.querySelector(`.nav-item[onclick="navigate('${viewId}')"]`);
-  if (activeNav) activeNav.classList.add("active");
-  
-  // 렌더링 매핑
-  const container = document.getElementById("mainContent");
-  switch (viewId) {
-    case "dashboard":
-      renderDashboard(container);
-      break;
-    case "studentManage":
-      renderStudentManage(container);
-      break;
-    case "teacherManage":
-      renderTeacherManage(container);
-      break;
-    case "timetable":
-      renderTimetable(container);
-      break;
-    case "progress":
-      renderProgress(container);
-      break;
-  }
-}
-
-// ==========================================
-// 5. 뷰 렌더링 세부 함수들
-// ==========================================
-
-// 5-1. 대시보드 뷰
-function renderDashboard(container) {
-  let noticeListHtml = state.notices.map(n => `
-    <div class="notice-item">
-      <div style="font-weight:700; font-size:1.05rem;">${n.title}</div>
-      <p style="color:var(--text-secondary); margin-top:0.4rem; white-space:pre-line;">${n.content}</p>
-      <div class="notice-meta">
-        <span>작성자: ${n.author}</span>
-        <span>등록일자: ${n.date}</span>
-      </div>
-    </div>
-  `).join("");
-
-  if (state.notices.length === 0) {
-    noticeListHtml = `<p style="color:var(--text-muted);">등록된 공지사항이 없습니다.</p>`;
-  }
-
-  const noticeCreateForm = state.currentRole === "director" ? `
-    <div class="card" style="margin-top: 1rem;">
-      <div class="card-title">공지사항 등록 (원장 전용)</div>
-      <div style="display:flex; flex-direction:column; gap:0.75rem;">
-        <div>
-          <label>제목</label>
-          <input type="text" id="noticeTitle" placeholder="공지사항 제목을 입력하세요">
-        </div>
-        <div>
-          <label>내용</label>
-          <textarea id="noticeContent" rows="3" placeholder="공지사항 내용을 상세히 작성하세요"></textarea>
-        </div>
-        <button class="btn" onclick="saveNewNotice()">공지 등록</button>
-      </div>
-    </div>
-  ` : "";
-
-  container.innerHTML = `
-    <h1>대시보드</h1>
-    <div class="dashboard-grid">
-      <!-- Left Column: Notices -->
-      <div>
-        <div class="card">
-          <div class="card-title">학원 공지사항</div>
-          <div id="noticeBoard">
-            ${noticeListHtml}
-          </div>
-        </div>
-        ${noticeCreateForm}
-      </div>
-
-      <!-- Right Column: Blog & Univ Banners -->
-      <div>
-        <div class="card">
-          <div class="card-title">공식 블로그 배너</div>
-          <div class="banner-list">
-            <a href="https://blog.naver.com/tankpro11" target="_blank" class="banner-link">
-              <div>
-                <div style="font-weight: 700; color:var(--accent);">대치리드인</div>
-                <div style="font-size: 0.8rem; color:var(--text-secondary);">유주코칭국어학원 블로그</div>
-              </div>
-              <i data-lucide="external-link"></i>
-            </a>
-            <a href="https://blog.naver.com/ujucoach" target="_blank" class="banner-link">
-              <div>
-                <div style="font-weight: 700; color:var(--accent);">유주코칭 & 컨설팅</div>
-                <div style="font-size: 0.8rem; color:var(--text-secondary);">진로진학상담교습소 블로그</div>
-              </div>
-              <i data-lucide="external-link"></i>
-            </a>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">주요 대학교 입학처</div>
-          <div class="university-grid">
-            <a href="https://admission.snu.ac.kr/" target="_blank" class="univ-link">서울대</a>
-            <a href="https://admission.yonsei.ac.kr/" target="_blank" class="univ-link">연세대</a>
-            <a href="https://kuapply.korea.ac.kr/" target="_blank" class="univ-link">고려대</a>
-            <a href="https://admission.skku.edu/" target="_blank" class="univ-link">성균관대</a>
-            <a href="https://admission.cau.ac.kr/" target="_blank" class="univ-link">중앙대</a>
-            <a href="https://go.hanyang.ac.kr/" target="_blank" class="univ-link">한양대</a>
-            <a href="https://admission.sogang.ac.kr/" target="_blank" class="univ-link">서강대</a>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-  lucide.createIcons();
-}
-
-window.saveNewNotice = function() {
-  const title = document.getElementById("noticeTitle").value.trim();
-  const content = document.getElementById("noticeContent").value.trim();
-  
-  if (!title || !content) {
-    alert("공지사항 제목과 내용을 모두 입력해 주세요.");
-    return;
-  }
-
-  const newNotice = {
-    id: "nt-" + Date.now(),
-    title,
-    content,
-    date: state.selectedDate,
-    author: "원장"
-  };
-
-  state.notices.unshift(newNotice);
-  saveStateToStorage();
-  renderDashboard(document.getElementById("mainContent"));
-};
-
-// 5-2. 학생 및 출결관리 뷰
-function renderStudentManage(container) {
-  const isDirector = state.currentRole === "director";
-  const isAssistant = state.currentRole === "assistant";
-  const hasEditAccess = isDirector; // 등록 및 수정은 원장만
-
-  let tabButtonsHtml = `
-    <button class="tab-btn ${state.studentTab === 'register' ? 'active' : ''}" onclick="switchStudentTab('register')">등록 및 원생 관리</button>
-    <button class="tab-btn ${state.studentTab === 'attendance' ? 'active' : ''}" onclick="switchStudentTab('attendance')">출결 관리</button>
-  `;
-
-  let contentHtml = "";
-  if (state.studentTab === "register") {
-    // 등록/조회 양식
-    const studentListRows = state.students.map(s => `
-      <tr>
-        <td class="${isNewStudent(s.registeredDate) ? 'new-student' : ''}">${s.name}</td>
-        <td>${s.school}</td>
-        <td>${s.grade}</td>
-        <td>${s.gender}</td>
-        <td>${s.studentPhone}</td>
-        <td>${s.registeredDate || "-"}</td>
-        <td>${s.dischargedDate ? `<span class="status-pill danger">퇴원(${s.dischargedDate})</span>` : s.suspendedDate ? `<span class="status-pill warning">휴원(${s.suspendedDate})</span>` : '<span class="status-pill success">재원</span>'}</td>
-        <td>
-          <button class="btn btn-sm btn-secondary" onclick="openStudentDetail('${s.id}')">상세/수정</button>
-        </td>
-      </tr>
-    `).join("");
-
-    contentHtml = `
-      <div class="card">
-        <div class="card-title">원생 등록 및 현황
-          ${hasEditAccess ? `<button class="btn btn-sm" onclick="openStudentDetail('')">신규 원생 등록</button>` : ""}
-        </div>
-        <div style="overflow-x:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>이름</th>
-                <th>학교</th>
-                <th>학년</th>
-                <th>성별</th>
-                <th>학생 연락처</th>
-                <th>등록일자</th>
-                <th>상태</th>
-                <th>작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${studentListRows}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  } else {
-    // 출결관리 탭
-    // 7월 21일에 등원하기로 지정된 수강 일정 학생들 불러오기
-    const scheduledToday = state.enrollments.filter(e => e.date === state.selectedDate);
-    
-    // 오늘 기록된 출결 정보 매핑
-    const attendanceToday = state.attendance.filter(a => a.date === state.selectedDate);
-
-    const attendListRows = scheduledToday.map(sc => {
-      const student = state.students.find(s => s.id === sc.studentId);
-      if (!student) return "";
-      
-      const record = attendanceToday.find(a => a.studentId === sc.studentId);
-      const isConfirmed = record ? record.isConfirmed : false;
-      
-      const isNew = isNewStudent(student.registeredDate);
-      const nameClass = isNew ? "new-student" : "";
-
-      const actualStart = record ? record.actualStartTime : sc.startTime;
-      const actualEnd = record ? record.actualEndTime : sc.endTime;
-      const status = record ? record.status : "정상";
-      const totalMin = calculateDuration(actualStart, actualEnd);
-
-      return `
-        <tr>
-          <td class="${nameClass}">${student.name}</td>
-          <td>${student.school} (${student.grade})</td>
-          <td>${sc.startTime} ~ ${sc.endTime}</td>
-          <td>
-            <input type="time" step="600" value="${actualStart}" id="att-start-${sc.studentId}" ${isConfirmed || (!isDirector && !isAssistant) ? "disabled" : ""} onchange="updateAttendanceTimes('${sc.studentId}')">
-          </td>
-          <td>
-            <input type="time" step="600" value="${actualEnd}" id="att-end-${sc.studentId}" ${isConfirmed || (!isDirector && !isAssistant) ? "disabled" : ""} onchange="updateAttendanceTimes('${sc.studentId}')">
-          </td>
-          <td id="att-dur-${sc.studentId}">${totalMin}분</td>
-          <td>
-            <select id="att-status-${sc.studentId}" ${isConfirmed || (!isDirector && !isAssistant) ? "disabled" : ""}>
-              <option value="정상" ${status === '정상' ? 'selected' : ''}>정상</option>
-              <option value="지각" ${status === '지각' ? 'selected' : ''}>지각</option>
-              <option value="결석" ${status === '결석' ? 'selected' : ''}>결석</option>
-              <option value="조퇴" ${status === '조퇴' ? 'selected' : ''}>조퇴</option>
-            </select>
-          </td>
-          <td>
-            ${isConfirmed 
-              ? `<span class="status-pill success">확정완료</span>`
-              : (isDirector || isAssistant)
-                ? `<button class="btn btn-sm" onclick="confirmAttendance('${sc.studentId}', '${sc.startTime}', '${sc.endTime}')">출결 확정</button>`
-                : `<span class="status-pill warning">미확정</span>`
-            }
-          </td>
-        </tr>
-      `;
-    }).join("");
-
-    // 수강 일정에 없으나 당일 예외 등원한 학생들을 위한 리스트업
-    const extraStudents = attendanceToday.filter(a => !scheduledToday.some(sc => sc.studentId === a.studentId));
-    const extraRows = extraStudents.map(a => {
-      const student = state.students.find(s => s.id === a.studentId);
-      if (!student) return "";
-      const isNew = isNewStudent(student.registeredDate);
-      const nameClass = isNew ? "new-student" : "";
-      const totalMin = calculateDuration(a.actualStartTime, a.actualEndTime);
-
-      return `
-        <tr style="background: rgba(16, 185, 129, 0.05);">
-          <td class="${nameClass}">${student.name} <span class="status-pill success" style="font-size:0.6rem;">예외등원</span></td>
-          <td>${student.school} (${student.grade})</td>
-          <td>수강계획 없음</td>
-          <td>
-            <input type="time" step="600" value="${a.actualStartTime}" id="att-start-${a.studentId}" ${a.isConfirmed || (!isDirector && !isAssistant) ? "disabled" : ""} onchange="updateAttendanceTimes('${a.studentId}')">
-          </td>
-          <td>
-            <input type="time" step="600" value="${a.actualEndTime}" id="att-end-${a.studentId}" ${a.isConfirmed || (!isDirector && !isAssistant) ? "disabled" : ""} onchange="updateAttendanceTimes('${a.studentId}')">
-          </td>
-          <td id="att-dur-${a.studentId}">${totalMin}분</td>
-          <td>
-            <select id="att-status-${a.studentId}" ${a.isConfirmed || (!isDirector && !isAssistant) ? "disabled" : ""}>
-              <option value="정상" ${a.status === '정상' ? 'selected' : ''}>정상</option>
-              <option value="지각" ${a.status === '지각' ? 'selected' : ''}>지각</option>
-              <option value="결석" ${a.status === '결석' ? 'selected' : ''}>결석</option>
-              <option value="조퇴" ${a.status === '조퇴' ? 'selected' : ''}>조퇴</option>
-            </select>
-          </td>
-          <td>
-            ${a.isConfirmed 
-              ? `<span class="status-pill success">확정완료</span>`
-              : (isDirector || isAssistant)
-                ? `<button class="btn btn-sm" onclick="confirmAttendance('${a.studentId}', '', '', true)">출결 확정</button>`
-                : `<span class="status-pill warning">미확정</span>`
-            }
-          </td>
-        </tr>
-      `;
-    }).join("");
-
-    contentHtml = `
-      <div class="card">
-        <div class="card-title">출결 상황판 (${state.selectedDate})
-          ${(isDirector || isAssistant) ? `<button class="btn btn-sm btn-secondary" onclick="openAddExtraAttendanceModal()">미등록 원생 등원 추가</button>` : ""}
-        </div>
-        <div style="overflow-x:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>이름</th>
-                <th>학교/학년</th>
-                <th>예정 시간</th>
-                <th>실제 입실</th>
-                <th>실제 퇴실</th>
-                <th>출석시간</th>
-                <th>출결상태</th>
-                <th>작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${attendListRows.length === 0 && extraRows.length === 0 
-                ? `<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">오늘 예정된 수업이나 등원한 학생이 없습니다.</td></tr>` 
-                : attendListRows + extraRows}
-            </tbody>
-          </table>
-        </div>
-        <div style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-secondary);">
-          * 등록 시간과 실제 입퇴실 시간이 동일하면 즉시 <strong>[출결 확정]</strong> 가능합니다.<br>
-          * 지각이나 예외 등원 등으로 시간이 다를 경우, 입퇴실 시간을 10분 단위로 수정한 뒤 확정해 주세요.
-        </div>
-      </div>
-    `;
-  }
-
-  container.innerHTML = `
-    <h1>학생 및 출결관리</h1>
-    <div class="tabs no-print">
-      ${tabButtonsHtml}
-    </div>
-    ${contentHtml}
-  `;
-  lucide.createIcons();
-}
-
-window.switchStudentTab = function(tabName) {
-  state.studentTab = tabName;
-  navigate("studentManage");
-};
-
-// 10분 단위 입출 시간 바뀔 때 실소요 시간 동적으로 리프레시해주는 기능
-window.updateAttendanceTimes = function(studentId) {
-  const startVal = document.getElementById(`att-start-${studentId}`).value;
-  const endVal = document.getElementById(`att-end-${studentId}`).value;
-  const durTd = document.getElementById(`att-dur-${studentId}`);
-  if (durTd) {
-    durTd.innerText = `${calculateDuration(startVal, endVal)}분`;
-  }
-};
-
-// 출결 사항 확정 로직
-window.confirmAttendance = function(studentId, schedStart = "", schedEnd = "", isExtra = false) {
-  const actualStart = document.getElementById(`att-start-${studentId}`).value;
-  const actualEnd = document.getElementById(`att-end-${studentId}`).value;
-  const status = document.getElementById(`att-status-${studentId}`).value;
-  
-  if (!actualStart || !actualEnd) {
-    alert("입실시간과 퇴실시간을 정상 입력해 주세요.");
-    return;
-  }
-
-  // 기존 출결 레코드가 있으면 덮어쓰고 없으면 푸시
-  const existingIdx = state.attendance.findIndex(a => a.studentId === studentId && a.date === state.selectedDate);
-  const record = {
-    id: existingIdx >= 0 ? state.attendance[existingIdx].id : "att-" + Date.now(),
+  const id = `att-${studentId}-${state.selectedDate}`;
+  const attendanceRecord = {
+    id,
     studentId,
     date: state.selectedDate,
-    scheduledStartTime: schedStart,
-    scheduledEndTime: schedEnd,
-    actualStartTime: actualStart,
-    actualEndTime: actualEnd,
-    status,
+    plannedIn: planIn,
+    plannedOut: planOut,
+    actualIn: actIn,
+    actualOut: actOut,
     isConfirmed: true
   };
-
-  if (existingIdx >= 0) {
-    state.attendance[existingIdx] = record;
-  } else {
-    state.attendance.push(record);
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_attendance")
+      .upsert([{ id, data: attendanceRecord }]);
+      
+    if (!error) {
+      alert("출결 기록이 정상적으로 확정되었습니다.");
+      await loadAllData();
+      renderStudentAttendance();
+    } else {
+      alert("저장 실패");
+    }
+  } catch (err) {
+    console.error(err);
   }
+}
 
-  saveStateToStorage();
-  alert("출결 기록이 확정되었습니다.");
-  navigate("studentManage");
-};
-
-// 미등록 학생 출결 강제 등록 모달 띄우기
-window.openAddExtraAttendanceModal = function() {
-  const notScheduled = state.students.filter(s => 
-    !state.attendance.some(a => a.studentId === s.id && a.date === state.selectedDate) &&
-    !state.enrollments.some(e => e.studentId === s.id && e.date === state.selectedDate)
-  );
-
-  if (notScheduled.length === 0) {
-    alert("예외 등원 추가 가능한 미등록 원생이 없습니다.");
-    return;
-  }
-
-  const modal = document.getElementById("modalOverlay");
-  const modalContent = document.getElementById("modalContent");
-
-  modalContent.innerHTML = `
-    <h3 style="margin-bottom:1rem;">예외 등원 학생 추가</h3>
-    <div style="display:flex; flex-direction:column; gap:0.75rem;">
-      <div>
+// 등록 안 한 날 급히 온 비등록 등원생 추가 모달
+function openAddExtraAttendanceModal() {
+  const optionsHTML = state.students.map(s => `<option value="${s.id}">${escapeHTML(s.name)}</option>`).join("");
+  
+  openModal(`
+    <div class="modal-header">
+      <h3>비등록 등원 학생 추가</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
         <label>학생 선택</label>
-        <select id="extraStudentId">
-          ${notScheduled.map(s => `<option value="${s.id}">${s.name} (${s.school})</option>`).join("")}
+        <select id="extraStId">
+          ${optionsHTML}
         </select>
       </div>
-      <div class="form-grid">
-        <div>
-          <label>실제 입실</label>
-          <input type="time" value="14:00" id="extraStartTime">
+      <div style="display:flex; gap:12px;">
+        <div class="form-group" style="flex:1;">
+          <label>실제 등원시간</label>
+          <input type="time" id="extraIn" value="13:00">
         </div>
-        <div>
-          <label>실제 퇴실</label>
-          <input type="time" value="16:00" id="extraEndTime">
+        <div class="form-group" style="flex:1;">
+          <label>실제 하원시간</label>
+          <input type="time" id="extraOut" value="15:00">
         </div>
       </div>
-      <div>
-        <label>상태</label>
-        <select id="extraStatus">
-          <option value="정상">정상</option>
-          <option value="지각">지각</option>
-        </select>
-      </div>
+      <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:16px;" onclick="handleAddExtraAttendance()">출결 추가 저장</button>
     </div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="closeModal()">취소</button>
-      <button class="btn" onclick="saveExtraAttendance()">추가</button>
-    </div>
-  `;
-  modal.style.display = "flex";
-};
+  `);
+}
 
-window.saveExtraAttendance = function() {
-  const studentId = document.getElementById("extraStudentId").value;
-  const actualStartTime = document.getElementById("extraStartTime").value;
-  const actualEndTime = document.getElementById("extraEndTime").value;
-  const status = document.getElementById("extraStatus").value;
+async function handleAddExtraAttendance() {
+  const studentId = document.getElementById("extraStId").value;
+  const actIn = document.getElementById("extraIn").value;
+  const actOut = document.getElementById("extraOut").value;
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) return;
 
-  const newRecord = {
-    id: "att-" + Date.now(),
+  // 비등록 등원이므로 계획 시간은 실제 시간과 동일하게 세팅
+  const id = `att-${studentId}-${state.selectedDate}`;
+  const attendanceRecord = {
+    id,
     studentId,
     date: state.selectedDate,
-    scheduledStartTime: "",
-    scheduledEndTime: "",
-    actualStartTime,
-    actualEndTime,
-    status,
-    isConfirmed: false // 대시보드 리스트에서 확정받을 수 있도록 함
+    plannedIn: actIn,
+    plannedOut: actOut,
+    actualIn: actIn,
+    actualOut: actOut,
+    isConfirmed: true
   };
-
-  state.attendance.push(newRecord);
-  saveStateToStorage();
-  closeModal();
-  navigate("studentManage");
-};
-
-// 학생 등록/수정 모달 띄우기
-window.openStudentDetail = function(studentId) {
-  const student = state.students.find(s => s.id === studentId) || {
-    id: "", name: "", school: "", grade: "중등", gender: "남",
-    birthDate: "", studentPhone: "", parentPhone1: "", parentPhone2: "",
-    registeredDate: state.selectedDate, suspendedDate: "", reregisteredDate: "", dischargedDate: "",
-    careerHopes: ["", "", ""], specialNote: "", isEditAllowed: false
+  
+  // 요구사항: 등록하지 않은 날에 출석하는 경우는 출결관리에 추가하고 학생별 카렌다에도 반영된다!
+  // 즉, agy_enrollments(수강신청)에도 해당 건의 수강 레코드가 생성되어야 캘린더에 표시됨
+  const enrollId = `enr-extra-${studentId}-${state.selectedDate}`;
+  const enrollmentRecord = {
+    id: enrollId,
+    studentId,
+    date: state.selectedDate,
+    startTime: actIn,
+    endTime: actOut
   };
+  
+  try {
+    await Promise.all([
+      supabaseClient.from("agy_attendance").upsert([{ id, data: attendanceRecord }]),
+      supabaseClient.from("agy_enrollments").upsert([{ id: enrollId, data: enrollmentRecord }])
+    ]);
+    
+    alert(`${student.name} 학생의 긴급 등원 출결 추가 및 캘린더 수강 등록이 완료되었습니다.`);
+    await loadAllData();
+    closeModal();
+    renderStudentAttendance();
+  } catch (err) {
+    console.error(err);
+  }
+}
 
-  const modal = document.getElementById("modalOverlay");
-  const modalContent = document.getElementById("modalContent");
 
-  const career1 = student.careerHopes[0] || "";
-  const career2 = student.careerHopes[1] || "";
-  const career3 = student.careerHopes[2] || "";
+// --- ④ 강사 관리 뷰 ---
+let teacherTab = "reg"; // reg: 강사등록, plan: 근무계획, log: 근무일지
 
-  modalContent.innerHTML = `
-    <h3 style="margin-bottom:1rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;">
-      ${student.id ? "원생 상세 정보 / 수정" : "신규 원생 정보 등록"}
-    </h3>
-    <div style="max-height: 450px; overflow-y: auto; padding-right:0.5rem;">
-      <div class="form-grid">
-        <div>
-          <label>이름</label>
-          <input type="text" id="studName" value="${student.name}">
-        </div>
-        <div>
-          <label>학교</label>
-          <input type="text" id="studSchool" value="${student.school}">
-        </div>
-      </div>
-      <div class="form-grid">
-        <div>
-          <label>학년 구분</label>
-          <select id="studGrade">
-            <option value="초등 1학년" ${student.grade === '초등 1학년' ? 'selected' : ''}>초등 1학년 (초등저)</option>
-            <option value="초등 2학년" ${student.grade === '초등 2학년' ? 'selected' : ''}>초등 2학년 (초등저)</option>
-            <option value="초등 3학년" ${student.grade === '초등 3학년' ? 'selected' : ''}>초등 3학년 (초등저)</option>
-            <option value="초등 4학년" ${student.grade === '초등 4학년' ? 'selected' : ''}>초등 4학년 (초등저)</option>
-            <option value="초등 5학년" ${student.grade === '초등 5학년' ? 'selected' : ''}>초등 5학년 (초등고)</option>
-            <option value="초등 6학년" ${student.grade === '초등 6학년' ? 'selected' : ''}>초등 6학년 (초등고)</option>
-            <option value="중등 1학년" ${student.grade === '중등 1학년' ? 'selected' : ''}>중등 1학년</option>
-            <option value="중등 2학년" ${student.grade === '중등 2학년' ? 'selected' : ''}>중등 2학년</option>
-            <option value="중등 3학년" ${student.grade === '중등 3학년' ? 'selected' : ''}>중등 3학년</option>
-            <option value="고등 1학년" ${student.grade === '고등 1학년' ? 'selected' : ''}>고등 1학년</option>
-            <option value="고등 2학년" ${student.grade === '고등 2학년' ? 'selected' : ''}>고등 2학년</option>
-            <option value="고등 3학년" ${student.grade === '고등 3학년' ? 'selected' : ''}>고등 3학년</option>
-          </select>
-        </div>
-        <div>
-          <label>성별</label>
-          <select id="studGender">
-            <option value="남" ${student.gender === '남' ? 'selected' : ''}>남</option>
-            <option value="여" ${student.gender === '여' ? 'selected' : ''}>여</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-grid">
-        <div>
-          <label>생년월일</label>
-          <input type="date" id="studBirth" value="${student.birthDate}">
-        </div>
-        <div>
-          <label>학생 연락처</label>
-          <input type="text" id="studPhone" value="${student.studentPhone}">
-        </div>
-      </div>
-      <div class="form-grid">
-        <div>
-          <label>학부모 연락처 1</label>
-          <input type="text" id="studParent1" value="${student.parentPhone1}">
-        </div>
-        <div>
-          <label>학부모 연락처 2</label>
-          <input type="text" id="studParent2" value="${student.parentPhone2}">
-        </div>
-      </div>
-      <div class="form-grid">
-        <div>
-          <label>등록일자</label>
-          <input type="date" id="studRegDate" value="${student.registeredDate}">
-        </div>
-        <div>
-          <label>휴원일자</label>
-          <input type="date" id="studSuspDate" value="${student.suspendedDate}">
-        </div>
-      </div>
-      <div class="form-grid">
-        <div>
-          <label>재등록일자</label>
-          <input type="date" id="studReregDate" value="${student.reregisteredDate}">
-        </div>
-        <div>
-          <label>퇴원일자</label>
-          <input type="date" id="studDischDate" value="${student.dischargedDate}">
-        </div>
-      </div>
+function renderTeachers() {
+  const container = document.getElementById("mainContent");
+  
+  let headerAction = "";
+  if (teacherTab === "reg" && state.currentUser.role === 'director') {
+    headerAction = `<button class="btn btn-emerald" onclick="openNewTeacherModal()"><i data-lucide="user-plus"></i> 신규 강사 등록</button>`;
+  }
 
-      <div style="border-top:1px solid var(--border-color); margin-top:1rem; padding-top:1rem;">
-        <label>진로 희망 비고칸 (3개, 각 최대 20자)</label>
-        <div style="display:flex; flex-direction:column; gap:0.5rem;">
-          <div>
-            <input type="text" id="studCareer1" maxlength="20" placeholder="진로희망 1 (20자 이내)" value="${career1}" oninput="updateCharCount('careerCount1', this.value)">
-            <div class="char-counter" id="careerCount1">${career1.length}/20</div>
-          </div>
-          <div>
-            <input type="text" id="studCareer2" maxlength="20" placeholder="진로희망 2 (20자 이내)" value="${career2}" oninput="updateCharCount('careerCount2', this.value)">
-            <div class="char-counter" id="careerCount2">${career2.length}/20</div>
-          </div>
-          <div>
-            <input type="text" id="studCareer3" maxlength="20" placeholder="진로희망 3 (20자 이내)" value="${career3}" oninput="updateCharCount('careerCount3', this.value)">
-            <div class="char-counter" id="careerCount3">${career3.length}/20</div>
-          </div>
-        </div>
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>강사 관리</h1>
+        <p>강사 인적 정보, 근무 계획 및 출퇴근 시간(결재)을 제어합니다.</p>
       </div>
-
-      <div style="margin-top:1rem;">
-        <label>특이사항 비고칸 (최대 20자)</label>
-        <input type="text" id="studNote" maxlength="20" placeholder="특이사항 입력 (20자 이내)" value="${student.specialNote}" oninput="updateCharCount('noteCount', this.value)">
-        <div class="char-counter" id="noteCount">${student.specialNote.length}/20</div>
+      <div class="action-bar">
+        ${headerAction}
       </div>
     </div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="closeModal()">취소</button>
-      ${state.currentRole === "director" ? `<button class="btn" onclick="saveStudent('${student.id}')">저장</button>` : ""}
+    
+    <div class="tabs-navigation">
+      <button class="tab-btn ${teacherTab === 'reg' ? 'active' : ''}" onclick="toggleTeacherTab('reg')">👩‍🏫 강사 등록</button>
+      <button class="tab-btn ${teacherTab === 'plan' ? 'active' : ''}" onclick="toggleTeacherTab('plan')">📅 근무 계획</button>
+      <button class="tab-btn ${teacherTab === 'log' ? 'active' : ''}" onclick="toggleTeacherTab('log')">✍️ 근무 일지 & 월별 통계</button>
+    </div>
+    
+    <div id="teacherTabContent"></div>
+  `;
+  
+  if (window.lucide) window.lucide.createIcons();
+  
+  if (teacherTab === "reg") {
+    renderTeacherReg();
+  } else if (teacherTab === "plan") {
+    renderTeacherPlan();
+  } else {
+    renderTeacherLogs();
+  }
+}
+
+function toggleTeacherTab(tab) {
+  teacherTab = tab;
+  renderTeachers();
+}
+
+// 1. 강사 인적사항 등록
+function renderTeacherReg() {
+  const target = document.getElementById("teacherTabContent");
+  
+  let rows = state.teachers.map(t => `
+    <tr>
+      <td><strong>${escapeHTML(t.name)}</strong></td>
+      <td>${escapeHTML(t.gender)}</td>
+      <td>${escapeHTML(t.academics)}</td>
+      <td>${escapeHTML(t.phone)}</td>
+      <td>${t.birthday}</td>
+    </tr>
+  `).join("");
+  
+  if (rows === "") {
+    rows = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">등록된 강사가 없습니다.</td></tr>`;
+  }
+
+  target.innerHTML = `
+    <div class="card">
+      <div class="card-title">강사 인적 사항 리스트</div>
+      <div class="table-responsive">
+        <table class="yuju-table">
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>성별</th>
+              <th>학력사항</th>
+              <th>전화번호</th>
+              <th>생년월일</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
-  modal.style.display = "flex";
-};
+}
 
-window.updateCharCount = function(id, text) {
-  document.getElementById(id).innerText = `${text.length}/20`;
-};
+function openNewTeacherModal() {
+  openModal(`
+    <div class="modal-header">
+      <h3>신규 강사 등록</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="newTeacherForm" onsubmit="handleNewTeacher(event)">
+        <div class="form-group">
+          <label>이름</label>
+          <input type="text" id="tcName" required>
+        </div>
+        <div class="form-group">
+          <label>성별</label>
+          <select id="tcGender">
+            <option value="여">여</option>
+            <option value="남">남</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>학력 사항</label>
+          <input type="text" id="tcAcademics" required placeholder="예: OO대학교 OO학과 졸업">
+        </div>
+        <div class="form-group">
+          <label>전화번호</label>
+          <input type="text" id="tcPhone" required placeholder="010-0000-0000">
+        </div>
+        <div class="form-group">
+          <label>생년월일</label>
+          <input type="date" id="tcBirthday" required>
+        </div>
+        <button type="submit" class="btn btn-emerald" style="width:100%; justify-content:center;">강사 등록 확정</button>
+      </form>
+    </div>
+  `);
+}
 
-window.saveStudent = function(studentId) {
-  const name = document.getElementById("studName").value.trim();
-  const school = document.getElementById("studSchool").value.trim();
-  const grade = document.getElementById("studGrade").value;
-  const gender = document.getElementById("studGender").value;
-  const birthDate = document.getElementById("studBirth").value;
-  const studentPhone = document.getElementById("studPhone").value.trim();
-  const parentPhone1 = document.getElementById("studParent1").value.trim();
-  const parentPhone2 = document.getElementById("studParent2").value.trim();
-  const registeredDate = document.getElementById("studRegDate").value;
-  const suspendedDate = document.getElementById("studSuspDate").value;
-  const reregisteredDate = document.getElementById("studReregDate").value;
-  const dischargedDate = document.getElementById("studDischDate").value;
+async function handleNewTeacher(event) {
+  event.preventDefault();
+  const name = document.getElementById("tcName").value.trim();
+  const id = `tc-${Date.now()}`;
+  
+  const teacherData = {
+    id,
+    name,
+    gender: document.getElementById("tcGender").value,
+    academics: document.getElementById("tcAcademics").value,
+    phone: document.getElementById("tcPhone").value,
+    birthday: document.getElementById("tcBirthday").value
+  };
+  
+  try {
+    await supabaseClient.from("agy_teachers").insert([{ id, data: teacherData }]);
+    
+    // 로그인 계정 연계 자동화 (비밀번호: 1234)
+    const userRow = {
+      username: name,
+      password: "1234",
+      role: "teacher",
+      is_password_changed: false,
+      ref_id: id
+    };
+    await supabaseClient.from("agy_users").insert([userRow]);
+    
+    alert(`${name} 강사 등록 및 계정 생성이 완료되었습니다.`);
+    await loadAllData();
+    closeModal();
+    renderTeacherReg();
+  } catch (err) {
+    console.error(err);
+  }
+}
 
-  const career1 = document.getElementById("studCareer1").value.trim();
-  const career2 = document.getElementById("studCareer2").value.trim();
-  const career3 = document.getElementById("studCareer3").value.trim();
-  const specialNote = document.getElementById("studNote").value.trim();
-
-  if (!name) {
-    alert("학생 이름을 입력해 주세요.");
+// 2. 강사 근무 계획 수립 (원장 전용)
+function renderTeacherPlan() {
+  const target = document.getElementById("teacherTabContent");
+  
+  if (state.currentUser.role !== 'director') {
+    target.innerHTML = `
+      <div class="card" style="text-align:center; padding:40px; color:var(--text-muted);">
+        <i data-lucide="shield-alert" style="width:48px; height:48px; margin:0 auto 12px; color:var(--accent-yellow)"></i>
+        <p>강사 주간 근무 계획 수립 기능은 <strong>원장 권한</strong> 전용 메뉴입니다.</p>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
     return;
   }
-
-  const payload = {
-    id: studentId || "st-" + Date.now(),
-    name, school, grade, gender, birthDate, studentPhone, parentPhone1, parentPhone2,
-    registeredDate, suspendedDate, reregisteredDate, dischargedDate,
-    careerHopes: [career1, career2, career3],
-    specialNote,
-    isEditAllowed: studentId ? (state.students.find(s => s.id === studentId).isEditAllowed || false) : false
-  };
-
-  if (studentId) {
-    const idx = state.students.findIndex(s => s.id === studentId);
-    state.students[idx] = payload;
-  } else {
-    state.students.push(payload);
-  }
-
-  saveStateToStorage();
-  closeModal();
-  navigate("studentManage");
-};
-
-// ==========================================
-// 5-3. 강사 및 근무관리 뷰
-// ==========================================
-function renderTeacherManage(container) {
-  const isDirector = state.currentRole === "director";
-  const isTeacher = state.currentRole === "teacher";
-
-  let tabButtonsHtml = "";
-  if (isDirector) {
-    tabButtonsHtml += `
-      <button class="tab-btn ${state.teacherTab === 'register' ? 'active' : ''}" onclick="switchTeacherTab('register')">강사 등록/목록</button>
-      <button class="tab-btn ${state.teacherTab === 'plan' ? 'active' : ''}" onclick="switchTeacherTab('plan')">근무 계획 배정 (원장)</button>
-      <button class="tab-btn ${state.teacherTab === 'worklog' ? 'active' : ''}" onclick="switchTeacherTab('worklog')">실제 근무 확정</button>
-      <button class="tab-btn ${state.teacherTab === 'stats' ? 'active' : ''}" onclick="switchTeacherTab('stats')">월간 총 근무 시간</button>
-    `;
-  } else if (isTeacher) {
-    tabButtonsHtml += `
-      <button class="tab-btn ${state.teacherTab === 'worklog' ? 'active' : ''}" onclick="switchTeacherTab('worklog')">일일 근무 일지 입력</button>
-      <button class="tab-btn ${state.teacherTab === 'stats' ? 'active' : ''}" onclick="switchTeacherTab('stats')">내 월간 근무 조회</button>
-    `;
-  }
-
-  let contentHtml = "";
-  if (state.teacherTab === "register" && isDirector) {
-    // 강사 목록 & 등록
-    const teacherRows = state.teachers.map(t => `
+  
+  let rows = state.teacherSchedules.map(sch => {
+    const tc = state.teachers.find(t => t.id === sch.teacherId);
+    if (!tc) return "";
+    return `
       <tr>
-        <td>${t.name}</td>
-        <td>${t.gender}</td>
-        <td>${t.education}</td>
-        <td>${t.phone}</td>
-        <td>${t.birthDate}</td>
+        <td><strong>${escapeHTML(tc.name)}</strong></td>
+        <td>${sch.dayOfWeek}요일</td>
+        <td>${sch.startTime} ~ ${sch.endTime}</td>
+        <td>
+          <button class="btn btn-danger" style="padding:4px 8px; font-size:11px;" onclick="deleteTeacherSchedule('${sch.id}')">삭제</button>
+        </td>
       </tr>
-    `).join("");
-
-    contentHtml = `
-      <div class="card">
-        <div class="card-title">강사 등록
-          <button class="btn btn-sm" onclick="openAddTeacherModal()">신규 강사 등록</button>
-        </div>
-        <div style="overflow-x:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>이름</th>
-                <th>성별</th>
-                <th>학력사항</th>
-                <th>전화번호</th>
-                <th>생년월일</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${teacherRows.length === 0 ? '<tr><td colspan="5" style="text-align:center;">등록된 강사가 없습니다.</td></tr>' : teacherRows}
-            </tbody>
-          </table>
-        </div>
-      </div>
     `;
-  } else if (state.teacherTab === "plan" && isDirector) {
-    // 강사 근무 계획 세우기 (10분 단위)
-    const schedulesToday = state.teacherSchedules.filter(ts => ts.date === state.selectedDate);
-    const planRows = state.teachers.map(t => {
-      const sched = schedulesToday.find(s => s.teacherId === t.id);
-      const plannedStart = sched ? sched.plannedStartTime : "14:00";
-      const plannedEnd = sched ? sched.plannedEndTime : "20:00";
-      
-      return `
-        <tr>
-          <td><strong>${t.name} 강사</strong></td>
-          <td>
-            <input type="time" step="600" id="plan-start-${t.id}" value="${plannedStart}">
-          </td>
-          <td>
-            <input type="time" step="600" id="plan-end-${t.id}" value="${plannedEnd}">
-          </td>
-          <td>
-            <button class="btn btn-sm" onclick="saveTeacherPlan('${t.id}')">계획 저장</button>
-          </td>
-        </tr>
-      `;
-    }).join("");
+  }).join("");
+  
+  if (rows === "") {
+    rows = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">등록된 강사 계획이 없습니다.</td></tr>`;
+  }
 
-    contentHtml = `
-      <div class="card">
-        <div class="card-title">강사 일일 근무 계획 배정 (${state.selectedDate})</div>
-        <div style="overflow-x:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>강사 이름</th>
-                <th>계획 출근</th>
-                <th>계획 퇴근</th>
-                <th>작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${planRows}
-            </tbody>
-          </table>
-        </div>
-        <div style="margin-top:1rem; font-size:0.85rem; color:var(--text-secondary);">
-          * 원장님이 강사별 하루 계획 근무 시간을 10분 단위로 지정합니다.
-        </div>
-      </div>
-    `;
-  } else if (state.teacherTab === "worklog") {
-    // 실제 근무 일지 입력 & 확정
-    if (isTeacher) {
-      // 강사가 월간 단위로 근무 시간을 한눈에 입력할 수 있는 테이블 화면
-      const teacher = state.teachers.find(t => t.id === state.selectedTeacherId);
-      const [year, month] = state.selectedDate.split("-");
-      const currentYearMonth = `${year}-${month}`; // "2026-07"
-      const daysInMonth = new Date(Number(year), Number(month), 0).getDate(); // 7월 -> 31
-
-      let rowsHtml = "";
-      const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
-
-      for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = `${currentYearMonth}-${String(day).padStart(2, '0')}`;
-        const iterDate = new Date(Number(year), Number(month) - 1, day);
-        const dayName = dayNames[iterDate.getDay()];
-        
-        // 당일 계획
-        const plan = state.teacherSchedules.find(ts => ts.teacherId === state.selectedTeacherId && ts.date === dateStr);
-        // 당일 실제 근무
-        const log = state.teacherWorkLogs.find(wl => wl.teacherId === state.selectedTeacherId && wl.date === dateStr) || {
-          checkInTime: plan ? plan.plannedStartTime : "",
-          checkOutTime: plan ? plan.plannedEndTime : "",
-          breakTime: 0,
-          isConfirmed: false,
-          actualWorkMinutes: 0
-        };
-
-        const totalHours = log.actualWorkMinutes ? `${(log.actualWorkMinutes / 60).toFixed(1)}시간` : "-";
-        const isConfirmed = log.isConfirmed;
-
-        rowsHtml += `
-          <tr class="teacher-monthly-row">
-            <td><strong>${month}월 ${day}일 (${dayName})</strong></td>
-            <td>
-              ${plan ? `<span style="font-weight:600; color:var(--accent-hover);">${plan.plannedStartTime} ~ ${plan.plannedEndTime}</span>` : `<span style="color:var(--text-muted);">계획 없음</span>`}
-            </td>
-            <td>
-              <input type="time" step="600" id="m-in-${dateStr}" value="${log.checkInTime}" ${isConfirmed ? "disabled" : ""} style="padding:0.25rem; font-size:0.85rem;" onchange="updateMonthlyLogCalc('${dateStr}')">
-            </td>
-            <td>
-              <input type="time" step="600" id="m-out-${dateStr}" value="${log.checkOutTime}" ${isConfirmed ? "disabled" : ""} style="padding:0.25rem; font-size:0.85rem;" onchange="updateMonthlyLogCalc('${dateStr}')">
-            </td>
-            <td>
-              <div style="display:flex; align-items:center; gap:0.2rem;">
-                <input type="number" id="m-break-${dateStr}" value="${log.breakTime}" ${isConfirmed ? "disabled" : ""} style="padding:0.25rem; font-size:0.85rem; width:55px;" onchange="updateMonthlyLogCalc('${dateStr}')"> 분
-              </div>
-            </td>
-            <td id="m-dur-${dateStr}" style="font-weight:700;">${totalHours}</td>
-            <td>
-              ${isConfirmed 
-                ? `<span class="status-pill success">확정완료</span>`
-                : `<button class="btn btn-sm" onclick="saveMonthlyTeacherWorklog('${dateStr}')">저장</button>`
-              }
-            </td>
-          </tr>
-        `;
-      }
-
-      contentHtml = `
-        <div class="card">
-          <div class="card-title">${teacher ? teacher.name : ""} 강사 월간 근무 일지 일괄 등록 (${year}년 ${month}월)</div>
-          <div style="margin-bottom: 1rem; font-size:0.85rem; color:var(--text-secondary);">
-            * 해당 월의 일자별로 실제 근무 및 휴게시간을 입력하고 각각 [저장]해 주세요.<br>
-            * 원장님이 최종 승인(확정)을 마친 기록은 수정할 수 없으며, 월간 총 근무 통계에 즉시 반영됩니다.
-          </div>
-          <div style="overflow-y:auto; max-height:550px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>일자</th>
-                  <th>계획 근무 시간</th>
-                  <th>실제 출근</th>
-                  <th>실제 퇴근</th>
-                  <th>휴게시간</th>
-                  <th>실제 시간</th>
-                  <th>작업</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rowsHtml}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `;
-    } else if (isDirector) {
-      // 원장이 강사의 근무 일지를 확인하고 확정
-      const logsToday = state.teacherWorkLogs.filter(wl => wl.date === state.selectedDate);
-      const logRows = state.teachers.map(t => {
-        const log = logsToday.find(wl => wl.teacherId === t.id);
-        const plan = state.teacherSchedules.find(ts => ts.teacherId === t.id && ts.date === state.selectedDate);
-        
-        if (!log) {
-          return `
+  target.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 style="font-weight:700; font-size:16px;">강사별 주간 고정 계획 리스트</h3>
+      <button class="btn btn-emerald" onclick="openNewScheduleModal()"><i data-lucide="plus"></i> 주간 일정 수립</button>
+    </div>
+    
+    <div class="card">
+      <div class="table-responsive">
+        <table class="yuju-table">
+          <thead>
             <tr>
-              <td>${t.name}</td>
-              <td>${plan ? `${plan.plannedStartTime}~${plan.plannedEndTime}` : "없음"}</td>
-              <td colspan="4" style="color:var(--text-muted); text-align:center;">강사의 출결 기록이 아직 입력되지 않았습니다.</td>
+              <th>강사명</th>
+              <th>요일</th>
+              <th>가동 계획시간 (10분 단위)</th>
+              <th>작업</th>
             </tr>
-          `;
-        }
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  if (window.lucide) window.lucide.createIcons();
+}
 
-        const totalHours = (log.actualWorkMinutes / 60).toFixed(1);
-        return `
-          <tr>
-            <td><strong>${t.name}</strong></td>
-            <td>${plan ? `${plan.plannedStartTime}~${plan.plannedEndTime}` : "없음"}</td>
-            <td>${log.checkInTime} ~ ${log.checkOutTime}</td>
-            <td>${log.breakTime}분</td>
-            <td><strong>${totalHours}시간</strong> (${log.actualWorkMinutes}분)</td>
-            <td>
-              ${log.isConfirmed 
-                ? `<span class="status-pill success">확정됨</span>`
-                : `<button class="btn btn-sm" onclick="confirmTeacherWorklog('${log.id}')">근무 확정</button>`
-              }
-            </td>
-          </tr>
-        `;
-      }).join("");
-
-      contentHtml = `
-        <div class="card">
-          <div class="card-title">강사 근무 시간 검토 및 확정 (${state.selectedDate})</div>
-          <div style="overflow-x:auto;">
-            <table>
-              <thead>
-                <tr>
-                  <th>강사명</th>
-                  <th>계획 근무</th>
-                  <th>실제 출퇴근</th>
-                  <th>휴게시간</th>
-                  <th>실제 근무시간</th>
-                  <th>작업</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${logRows}
-              </tbody>
-            </table>
-          </div>
+function openNewScheduleModal() {
+  const options = state.teachers.map(t => `<option value="${t.id}">${escapeHTML(t.name)}</option>`).join("");
+  
+  openModal(`
+    <div class="modal-header">
+      <h3>강사 근무 일정 수립 (10분 단위 제어)</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>대상 강사</label>
+        <select id="schTeacherId">${options}</select>
+      </div>
+      <div class="form-group">
+        <label>요일</label>
+        <select id="schDay">
+          <option value="월">월요일</option>
+          <option value="화">화요일</option>
+          <option value="수">수요일</option>
+          <option value="목">목요일</option>
+          <option value="금">금요일</option>
+          <option value="토">토요일</option>
+          <option value="일">일요일</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:12px;">
+        <div class="form-group" style="flex:1;">
+          <label>출근 계획시간</label>
+          <input type="time" id="schStart" step="600" value="13:00" onchange="alignToTenMinutes(this)">
         </div>
-      `;
+        <div class="form-group" style="flex:1;">
+          <label>퇴근 계획시간</label>
+          <input type="time" id="schEnd" step="600" value="22:00" onchange="alignToTenMinutes(this)">
+        </div>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">* 분 단위는 학원 표준인 10분 단위(예: 13:00, 13:10, 13:20)로 제어됩니다.</p>
+      
+      <button class="btn btn-emerald" style="width:100%; justify-content:center;" onclick="handleNewSchedule()">근무 계획 등록</button>
+    </div>
+  `);
+}
+
+// 10분 단위 유효성 검사 강제 설정
+function alignToTenMinutes(input) {
+  const [h, m] = input.value.split(":").map(Number);
+  const roundedM = Math.round(m / 10) * 10;
+  let finalH = h;
+  let finalM = roundedM;
+  if (roundedM === 60) {
+    finalH = (h + 1) % 24;
+    finalM = 0;
+  }
+  input.value = `${String(finalH).padStart(2, "0")}:${String(finalM).padStart(2, "0")}`;
+}
+
+async function handleNewSchedule() {
+  const teacherId = document.getElementById("schTeacherId").value;
+  const dayOfWeek = document.getElementById("schDay").value;
+  const startTime = document.getElementById("schStart").value;
+  const endTime = document.getElementById("schEnd").value;
+  
+  const id = `sch-${Date.now()}`;
+  const data = { id, teacherId, dayOfWeek, startTime, endTime };
+  
+  try {
+    await supabaseClient.from("agy_teacher_schedules").insert([{ id, data }]);
+    alert("근무 계획이 생성되었습니다.");
+    await loadAllData();
+    closeModal();
+    renderTeacherPlan();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function deleteTeacherSchedule(id) {
+  if (confirm("해당 강사 근무 일정을 삭제하시겠습니까?")) {
+    try {
+      await supabaseClient.from("agy_teacher_schedules").delete().eq("id", id);
+      await loadAllData();
+      renderTeacherPlan();
+    } catch (err) {
+      console.error(err);
     }
-  } else if (state.teacherTab === "stats") {
-    // 월별 총 시간 통계 화면
-    // 선택된 날짜의 년/월 구하기
-    const [year, month] = state.selectedDate.split("-");
-    const currentYearMonth = `${year}-${month}`; // "2026-07"
+  }
+}
 
-    let statsHtml = "";
-    if (isDirector) {
-      // 모든 강사의 월별 총 근무시간 요약
-      statsHtml = state.teachers.map(t => {
-        const monthlyLogs = state.teacherWorkLogs.filter(wl => 
-          wl.teacherId === t.id && 
-          wl.date.startsWith(currentYearMonth) && 
-          wl.isConfirmed === true
-        );
-        const totalMin = monthlyLogs.reduce((acc, log) => acc + log.actualWorkMinutes, 0);
-        const totalHour = (totalMin / 60).toFixed(1);
+// 3. 근무 일지 작성 및 원장 확정 (월간 총 시간 집계 콤보)
+let logSelectedMonth = "2026-07"; // 기본 통계 조회 월
 
-        return `
-          <div class="notice-item" style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <div style="font-weight:700; font-size:1.1rem;">${t.name} 강사</div>
-              <div style="color:var(--text-secondary); font-size:0.85rem;">확정된 근무 건수: ${monthlyLogs.length}건</div>
-            </div>
-            <div style="font-size:1.4rem; font-weight:800; color:var(--accent);">${totalHour} 시간</div>
+function renderTeacherLogs() {
+  const target = document.getElementById("teacherTabContent");
+  
+  // (1) 월별 총 시간 집계 테이블 생성
+  let totalHoursHTML = "";
+  
+  state.teachers.forEach(t => {
+    // 특정 강사의 선택된 월(logSelectedMonth)의 확정된 근무일지 선별
+    const confirmedLogs = state.teacherWorkLogs.filter(log => {
+      return log.teacherId === t.id && 
+             log.date.startsWith(logSelectedMonth) && 
+             log.isConfirmed;
+    });
+    
+    let totalMinutes = 0;
+    confirmedLogs.forEach(log => {
+      const workMin = calculateMinutes(log.actualStartTime, log.actualEndTime);
+      const restMin = Number(log.breakMinutes || 0);
+      totalMinutes += Math.max(0, workMin - restMin);
+    });
+    
+    const displayHours = (totalMinutes / 60).toFixed(1);
+    
+    totalHoursHTML += `
+      <tr>
+        <td><strong>${escapeHTML(t.name)}</strong></td>
+        <td>${logSelectedMonth}</td>
+        <td><strong style="color:var(--primary-color); font-size:16px;">${displayHours} 시간</strong></td>
+        <td>(${totalMinutes} 분)</td>
+      </tr>
+    `;
+  });
+
+  // (2) 일자별 근무일지 폼 구성
+  let logRowsHTML = "";
+  
+  // 로그인한 역할이 강사인 경우 자신의 일지만, 원장인 경우 전체 강사 일지가 보임
+  let filteredLogs = [...state.teacherWorkLogs];
+  if (state.currentUser.role === 'teacher') {
+    filteredLogs = filteredLogs.filter(l => l.teacherId === state.currentUser.ref_id);
+  }
+  
+  // 날짜 역순
+  filteredLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
+  
+  logRowsHTML = filteredLogs.map(log => {
+    const tc = state.teachers.find(t => t.id === log.teacherId);
+    if (!tc) return "";
+    
+    const isDirector = state.currentUser.role === 'director';
+    const isOwner = state.currentUser.ref_id === log.teacherId;
+    const editable = !log.isConfirmed && (isOwner || isDirector);
+    
+    const workMin = calculateMinutes(log.actualStartTime, log.actualEndTime);
+    const restMin = Number(log.breakMinutes || 0);
+    const netMin = Math.max(0, workMin - restMin);
+    
+    return `
+      <tr>
+        <td><strong>${escapeHTML(tc.name)}</strong></td>
+        <td>${log.date}</td>
+        <td>계획: ${log.planStartTime}~${log.planEndTime}</td>
+        <td>
+          <input type="time" id="actStart_${log.id}" value="${log.actualStartTime || ''}" ${!editable ? 'disabled' : ''} style="padding:4px;">
+        </td>
+        <td>
+          <input type="time" id="actEnd_${log.id}" value="${log.actualEndTime || ''}" ${!editable ? 'disabled' : ''} style="padding:4px;">
+        </td>
+        <td>
+          <input type="number" id="break_${log.id}" value="${log.breakMinutes || 0}" ${!editable ? 'disabled' : ''} style="width:60px; padding:4px;" min="0" step="10"> 분
+        </td>
+        <td><strong>${log.isConfirmed ? `${netMin}분` : '-'}</strong></td>
+        <td>
+          ${log.isConfirmed 
+            ? `<span class="badge badge-emerald">확정 완료</span>` 
+            : `
+              ${isOwner ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="saveTeacherLog('${log.id}', false)">저장</button>` : ''}
+              ${isDirector ? `<button class="btn btn-emerald" style="padding:4px 8px; font-size:11px;" onclick="saveTeacherLog('${log.id}', true)">확정결재</button>` : ''}
+            `
+          }
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  if (logRowsHTML === "") {
+    logRowsHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:20px;">등록 및 청구된 실제 근무 일지가 없습니다.</td></tr>`;
+  }
+
+  // (3) 일지 작성 기능 바 (자신이 강사인 경우에만 출근일지 작성 패널 활성화)
+  let addLogFormHTML = "";
+  if (state.currentUser.role === 'teacher') {
+    addLogFormHTML = `
+      <div class="card" style="background:var(--primary-light); border:1px solid rgba(5, 150, 105, 0.2)">
+        <div style="font-weight:700; margin-bottom:12px; color:var(--primary-color);">✍️ 오늘 자 근무 일지 청구하기</div>
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label>일자 선택</label>
+            <input type="date" id="newLogDate" value="${state.selectedDate}" style="padding:8px;">
           </div>
-        `;
-      }).join("");
+          <div class="form-group" style="margin-bottom:0;">
+            <label>실제 출근시간</label>
+            <input type="time" id="newLogStart" value="13:00" style="padding:8px;">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label>실제 퇴근시간</label>
+            <input type="time" id="newLogEnd" value="22:00" style="padding:8px;">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label>휴게 시간 (분)</label>
+            <input type="number" id="newLogBreak" value="0" style="width:90px; padding:8px;" min="0">
+          </div>
+          <button class="btn btn-emerald" onclick="handleNewWorklog()"><i data-lucide="plus-square"></i> 일지 제출</button>
+        </div>
+      </div>
+    `;
+  }
+
+  target.innerHTML = `
+    <!-- 월간 통계 합산 패널 (원장/강사 공통) -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 style="font-weight:800; font-size:16px;">📊 월별 강사 총 실근무 합계</h3>
+      <select id="logMonthSelector" onchange="changeLogMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm);">
+        <option value="2026-07" ${logSelectedMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
+        <option value="2026-08" ${logSelectedMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
+        <option value="2026-09" ${logSelectedMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
+      </select>
+    </div>
+    
+    <div class="card" style="margin-bottom:30px;">
+      <div class="table-responsive">
+        <table class="yuju-table" style="background:#fff;">
+          <thead>
+            <tr>
+              <th>강사명</th>
+              <th>해당월</th>
+              <th>총 근무시간 (원장 최종 확정분 기준)</th>
+              <th>상세 분</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${totalHoursHTML}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    ${addLogFormHTML}
+    
+    <!-- 근무일지 목록 & 확정 액션 -->
+    <h3 style="font-weight:800; font-size:16px; margin:30px 0 16px;">📋 강사 실제 출퇴근 제출부 및 확정 결재</h3>
+    <div class="card">
+      <div class="table-responsive">
+        <table class="yuju-table">
+          <thead>
+            <tr>
+              <th>강사명</th>
+              <th>일자</th>
+              <th>계획</th>
+              <th>실제 출근</th>
+              <th>실제 퇴근</th>
+              <th>휴게 시간</th>
+              <th>실수령 시간</th>
+              <th>결재 상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${logRowsHTML}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function changeLogMonth(ym) {
+  logSelectedMonth = ym;
+  renderTeacherLogs();
+}
+
+// 강사 오늘 일지 제출
+async function handleNewWorklog() {
+  const date = document.getElementById("newLogDate").value;
+  const actualStartTime = document.getElementById("newLogStart").value;
+  const actualEndTime = document.getElementById("newLogEnd").value;
+  const breakMinutes = Number(document.getElementById("newLogBreak").value || 0);
+  
+  const teacherId = state.currentUser.ref_id;
+  const id = `wl-${teacherId}-${date}`;
+  
+  // 해당 날짜 요일 구하기
+  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+  const dayOfWeek = dayNames[new Date(date).getDay()];
+  
+  // 고정 주간 근무계획을 찾아 기본값 세팅
+  const sch = state.teacherSchedules.find(s => s.teacherId === teacherId && s.dayOfWeek === dayOfWeek) || { startTime: "13:00", endTime: "22:00" };
+  
+  const data = {
+    id,
+    teacherId,
+    date,
+    planStartTime: sch.startTime,
+    planEndTime: sch.endTime,
+    actualStartTime,
+    actualEndTime,
+    breakMinutes,
+    isConfirmed: false
+  };
+  
+  try {
+    await supabaseClient.from("agy_teacher_worklogs").upsert([{ id, data }]);
+    alert("일지가 원장님께 정상 청구되었습니다. 원장 승인 시 근무시간으로 누적 반영됩니다.");
+    await loadAllData();
+    renderTeacherLogs();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// 일지 임시 저장 및 원장 확정 저장
+async function saveTeacherLog(logId, makeConfirmed) {
+  const actStart = document.getElementById(`actStart_${logId}`).value;
+  const actEnd = document.getElementById(`actEnd_${logId}`).value;
+  const breaks = Number(document.getElementById(`break_${logId}`).value || 0);
+  
+  const oldLog = state.teacherWorkLogs.find(l => l.id === logId);
+  if (!oldLog) return;
+  
+  const data = {
+    ...oldLog,
+    actualStartTime: actStart,
+    actualEndTime: actEnd,
+    breakMinutes: breaks,
+    isConfirmed: makeConfirmed
+  };
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_teacher_worklogs")
+      .upsert([{ id: logId, data }]);
+      
+    if (!error) {
+      alert(makeConfirmed ? "근무 시간 승인이 완료되었습니다." : "일지 수정사항이 임시 저장되었습니다.");
+      await loadAllData();
+      renderTeacherLogs();
     } else {
-      // 본인 강사의 월별 총 근무시간 요약
-      const t = state.teachers.find(tc => tc.id === state.selectedTeacherId);
-      const monthlyLogs = state.teacherWorkLogs.filter(wl => 
-        wl.teacherId === state.selectedTeacherId && 
-        wl.date.startsWith(currentYearMonth) && 
-        wl.isConfirmed === true
-      );
-      const totalMin = monthlyLogs.reduce((acc, log) => acc + log.actualWorkMinutes, 0);
-      const totalHour = (totalMin / 60).toFixed(1);
-
-      statsHtml = `
-        <div class="notice-item" style="display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <div style="font-weight:700; font-size:1.1rem;">${t ? t.name : ""} 강사님</div>
-            <div style="color:var(--text-secondary); font-size:0.85rem;">확정완료 근무 건수: ${monthlyLogs.length}건</div>
-          </div>
-          <div style="font-size:1.4rem; font-weight:800; color:var(--accent);">${totalHour} 시간</div>
-        </div>
-      `;
+      alert("처리 중 에러");
     }
+  } catch (err) {
+    console.error(err);
+  }
+}
 
-    contentHtml = `
-      <div class="card">
-        <div class="card-title">${year}년 ${month}월 강사 총 근무 시간 요약</div>
-        <div>
-          ${statsHtml}
-        </div>
+
+// --- ⑤ 수강 관리 (시간표) 뷰 ---
+let enrollSelectedStudentId = ""; // 캘린더 조회 타겟 학생
+let scheduleViewMode = "daily"; // daily: 일별등록표, weekly: 주간등록표
+
+function renderEnrollments() {
+  const container = document.getElementById("mainContent");
+  
+  // 로그인한 사용자가 학생인 경우 자동으로 본인 고정
+  if (state.currentUser.role === 'student') {
+    enrollSelectedStudentId = state.currentUser.ref_id;
+  } else if (!enrollSelectedStudentId && state.students.length > 0) {
+    // 디폴트로 1번 학생 선택
+    enrollSelectedStudentId = state.students[0].id;
+  }
+  
+  // 드롭다운 옵션 HTML 생성
+  const studentOptions = state.students.map(s => `
+    <option value="${s.id}" ${enrollSelectedStudentId === s.id ? 'selected' : ''}>${escapeHTML(s.name)} (${escapeHTML(s.school)} ${s.grade}학년)</option>
+  `).join("");
+  
+  // (1) 월간 수강 캘린더 렌더링
+  const [year, month] = opsYearMonth.split("-").map(Number);
+  const firstDayIndex = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthOps = state.monthlyOperations[opsYearMonth] || {};
+  
+  let cellsHTML = "";
+  // 빈칸
+  for (let i = 0; i < firstDayIndex; i++) {
+    cellsHTML += `<div class="calendar-cell inactive"></div>`;
+  }
+  // 일자별 수강 상태 체크
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
+    const op = monthOps[dateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
+    
+    // 이 날 학생의 수강신청 정보가 있는지 탐색
+    const enr = state.enrollments.find(e => e.studentId === enrollSelectedStudentId && e.date === dateStr);
+    
+    let cellClass = "operating";
+    let statusText = "신청 가능";
+    
+    if (op.isHoliday) {
+      cellClass = "closed holiday";
+      statusText = "학원 휴무일";
+    } else if (enr) {
+      cellClass = "operating";
+      statusText = `📝 ${enr.startTime}~${enr.endTime}`;
+    }
+    
+    cellsHTML += `
+      <div class="calendar-cell ${cellClass}" onclick="handleCalendarDateClick('${dateStr}', ${op.isHoliday})">
+        <span class="day-num">${d}</span>
+        <span class="cell-status" style="font-size:11px; font-weight:700;">${statusText}</span>
       </div>
     `;
   }
 
   container.innerHTML = `
-    <h1>강사 및 근무관리</h1>
-    <div class="tabs">
-      ${tabButtonsHtml}
-    </div>
-    ${contentHtml}
-  `;
-  lucide.createIcons();
-}
-
-window.switchTeacherTab = function(tabName) {
-  state.teacherTab = tabName;
-  navigate("teacherManage");
-};
-
-// 원장: 강사 등록 모달 오픈
-window.openAddTeacherModal = function() {
-  const modal = document.getElementById("modalOverlay");
-  const modalContent = document.getElementById("modalContent");
-
-  modalContent.innerHTML = `
-    <h3 style="margin-bottom:1rem;">신규 강사 등록</h3>
-    <div style="display:flex; flex-direction:column; gap:0.75rem;">
-      <div>
-        <label>이름</label>
-        <input type="text" id="teacherName">
+    <div class="page-header">
+      <div class="page-title">
+        <h1>수강 관리 (시간표)</h1>
+        <p>학생들의 월간 수강 신청 캘린더 조회 및 일별/주간 학년별 그리드 시간표를 제공합니다.</p>
       </div>
-      <div>
-        <label>성별</label>
-        <select id="teacherGender">
-          <option value="남">남</option>
-          <option value="여">여</option>
+      <div class="action-bar">
+        <!-- 원장이 학생 개별 수정 권한 조정용 토글 배치 -->
+        ${state.currentUser.role === 'director' ? `
+          <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+            <span style="font-size:12px; font-weight:700;">학생/학부모 수강 수정 허용:</span>
+            <input type="checkbox" id="allowEditToggle" onchange="toggleStudentEditAccess()" style="width:18px; height:18px; cursor:pointer;">
+          </div>
+        ` : ''}
+      </div>
+    </div>
+    
+    <!-- 1. 학생별 월간 일정 조회 및 등록 섹션 -->
+    <div class="card">
+      <div class="card-title">🗓 학생별 월간 수강 캘린더</div>
+      
+      <div style="display:flex; gap:12px; margin-bottom:20px; align-items:center;">
+        <span style="font-weight:800; font-size:14px;">조회할 학생 선택:</span>
+        <select id="enrollStSelector" onchange="changeEnrollStudent(this.value)" ${state.currentUser.role === 'student' ? 'disabled' : ''} style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+          ${studentOptions}
+        </select>
+        
+        <select id="enrollMonthSelector" onchange="changeOpsMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+          <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
+          <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
+          <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
         </select>
       </div>
-      <div>
-        <label>학력사항</label>
-        <input type="text" id="teacherEdu" placeholder="예: 서울대학교 국어교육과 졸업">
-      </div>
-      <div>
-        <label>전화번호</label>
-        <input type="text" id="teacherPhone" placeholder="010-0000-0000">
-      </div>
-      <div>
-        <label>생년월일</label>
-        <input type="date" id="teacherBirth">
+      
+      <div class="calendar-grid">
+        <div class="calendar-day-label" style="color:var(--accent-red);">일</div>
+        <div class="calendar-day-label">월</div>
+        <div class="calendar-day-label">화</div>
+        <div class="calendar-day-label">수</div>
+        <div class="calendar-day-label">목</div>
+        <div class="calendar-day-label">금</div>
+        <div class="calendar-day-label">토</div>
+        ${cellsHTML}
       </div>
     </div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="closeModal()">취소</button>
-      <button class="btn" onclick="saveNewTeacher()">등록</button>
+    
+    <!-- 2. 대형 그리드 시간표 테이블 섹션 -->
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div class="card-title" style="margin-bottom:0;">📊 학원 종합 그리드 시간표 (가로: 학년군 / 세로: 시간)</div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary ${scheduleViewMode === 'daily' ? 'btn-emerald' : ''}" onclick="toggleTimetableMode('daily')">일별 그리드</button>
+          <button class="btn btn-secondary ${scheduleViewMode === 'weekly' ? 'btn-emerald' : ''}" onclick="toggleTimetableMode('weekly')">주간 그리드</button>
+        </div>
+      </div>
+      
+      <div style="margin-bottom:12px;">
+        <strong>기준일자 선택:</strong>
+        <input type="date" id="gridDateSelector" value="${state.selectedDate}" onchange="changeGridDate(this.value)" style="padding:6px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+      </div>
+      
+      <div id="timetableGridTarget"></div>
     </div>
-  `;
-  modal.style.display = "flex";
-};
-
-window.saveNewTeacher = function() {
-  const name = document.getElementById("teacherName").value.trim();
-  const gender = document.getElementById("teacherGender").value;
-  const education = document.getElementById("teacherEdu").value.trim();
-  const phone = document.getElementById("teacherPhone").value.trim();
-  const birthDate = document.getElementById("teacherBirth").value;
-
-  if (!name) {
-    alert("강사 이름을 입력하세요.");
-    return;
-  }
-
-  const newTeacher = {
-    id: "tc-" + Date.now(),
-    name, gender, education, phone, birthDate
-  };
-
-  state.teachers.push(newTeacher);
-  saveStateToStorage();
-  closeModal();
-  navigate("teacherManage");
-};
-
-// 원장: 강사 일일 계획 저장
-window.saveTeacherPlan = function(teacherId) {
-  const start = document.getElementById(`plan-start-${teacherId}`).value;
-  const end = document.getElementById(`plan-end-${teacherId}`).value;
-
-  const existingIdx = state.teacherSchedules.findIndex(s => s.teacherId === teacherId && s.date === state.selectedDate);
-  const payload = {
-    id: existingIdx >= 0 ? state.teacherSchedules[existingIdx].id : "ts-" + Date.now(),
-    teacherId,
-    date: state.selectedDate,
-    plannedStartTime: start,
-    plannedEndTime: end
-  };
-
-  if (existingIdx >= 0) {
-    state.teacherSchedules[existingIdx] = payload;
-  } else {
-    state.teacherSchedules.push(payload);
-  }
-
-  saveStateToStorage();
-  alert("근무 계획이 저장되었습니다.");
-};
-
-// 강사: 월간 실제 근무 일지 개별 저장
-window.saveMonthlyTeacherWorklog = function(dateStr) {
-  const inTime = document.getElementById(`m-in-${dateStr}`).value;
-  const outTime = document.getElementById(`m-out-${dateStr}`).value;
-  const breakMin = Number(document.getElementById(`m-break-${dateStr}`).value) || 0;
-
-  if (!inTime || !outTime) {
-    alert("출근 및 퇴근 시간을 모두 입력해 주세요.");
-    return;
-  }
-
-  const totalMin = calculateDuration(inTime, outTime) - breakMin;
-  if (totalMin <= 0) {
-    alert("퇴근 시간 및 휴게 시간을 다시 확인해 주세요. 실제 근무 시간이 0분 이하입니다.");
-    return;
-  }
-
-  const existingIdx = state.teacherWorkLogs.findIndex(wl => wl.teacherId === state.selectedTeacherId && wl.date === dateStr);
-  const payload = {
-    id: existingIdx >= 0 ? state.teacherWorkLogs[existingIdx].id : "wl-" + Date.now(),
-    teacherId: state.selectedTeacherId,
-    date: dateStr,
-    checkInTime: inTime,
-    checkOutTime: outTime,
-    breakTime: breakMin,
-    actualWorkMinutes: totalMin,
-    isConfirmed: false
-  };
-
-  if (existingIdx >= 0) {
-    state.teacherWorkLogs[existingIdx] = payload;
-  } else {
-    state.teacherWorkLogs.push(payload);
-  }
-
-  saveStateToStorage();
-  alert(`${dateStr} 근무 일지가 저장(제출)되었습니다. 원장님이 확정하면 월 통계에 최종 합산됩니다.`);
-  navigate("teacherManage");
-};
-
-// 근무 입력 시 실시간 화면 상 소요시간 업데이트 헬퍼
-window.updateMonthlyLogCalc = function(dateStr) {
-  const inTime = document.getElementById(`m-in-${dateStr}`).value;
-  const outTime = document.getElementById(`m-out-${dateStr}`).value;
-  const breakMin = Number(document.getElementById(`m-break-${dateStr}`).value) || 0;
-  const durTd = document.getElementById(`m-dur-${dateStr}`);
-
-  if (inTime && outTime && durTd) {
-    const totalMin = calculateDuration(inTime, outTime) - breakMin;
-    durTd.innerText = totalMin > 0 ? `${(totalMin / 60).toFixed(1)}시간` : "0시간";
-  }
-};
-
-// 원장: 강사 실제 근무 확정
-window.confirmTeacherWorklog = function(logId) {
-  const idx = state.teacherWorkLogs.findIndex(wl => wl.id === logId);
-  if (idx >= 0) {
-    state.teacherWorkLogs[idx].isConfirmed = true;
-    saveStateToStorage();
-    alert("근무 일지가 확정되어 월 근무 통계에 반영되었습니다.");
-    navigate("teacherManage");
-  }
-};
-
-
-// ==========================================
-// 5-4. 수강 및 시간표관리 뷰
-// ==========================================
-function renderTimetable(container) {
-  const isDirector = state.currentRole === "director";
-  const isStudent = state.currentRole === "student";
-
-  let tabButtonsHtml = `
-    <button class="tab-btn ${state.timetableTab === 'registerCalendar' ? 'active' : ''}" onclick="switchTimetableTab('registerCalendar')">수강 신청 및 카렌다 등록</button>
-    <button class="tab-btn ${state.timetableTab === 'dailyList' ? 'active' : ''}" onclick="switchTimetableTab('dailyList')">일별 등록표 조회</button>
-    <button class="tab-btn ${state.timetableTab === 'weeklyList' ? 'active' : ''}" onclick="switchTimetableTab('weeklyList')">주간 등록표 조회</button>
   `;
   
-  if (isDirector) {
-    tabButtonsHtml += `
-      <button class="tab-btn ${state.timetableTab === 'academyCalendar' ? 'active' : ''}" onclick="switchTimetableTab('academyCalendar')">🗓 학원 휴일 & 가동시간 설정</button>
-    `;
+  if (window.lucide) window.lucide.createIcons();
+  
+  // 원장의 권한 토글 스위치 상태 동기화
+  if (state.currentUser.role === 'director') {
+    // 임의의 학생 권한 플래그 로딩 (isEditAllowed)
+    const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
+    if (targetStudent) {
+      document.getElementById("allowEditToggle").checked = !!targetStudent.isEditAllowed;
+    }
   }
+  
+  // 그리드 시간표 렌더링
+  renderGridTimetable();
+}
 
-  let contentHtml = "";
+function changeEnrollStudent(stId) {
+  enrollSelectedStudentId = stId;
+  renderEnrollments();
+}
 
-  if (state.timetableTab === "registerCalendar") {
-    // 수강 일정 등록 카렌다 뷰 및 설정
-    let configArea = "";
-    if (isDirector) {
-      // 원장 운영시간 관리 폼 및 권한 제어
-      configArea = `
-        <div class="card">
-          <div class="card-title">학원 운영 시간 & 수강수정 권한 관리 (원장 전용)</div>
-          <div class="form-grid">
-            <div>
-              <label>운영 시작시간 (10분단위)</label>
-              <input type="time" step="600" id="opStart" value="${state.operatingConfigs.startTime}">
-            </div>
-            <div>
-              <label>운영 종료시간 (10분단위)</label>
-              <input type="time" step="600" id="opEnd" value="${state.operatingConfigs.endTime}">
-            </div>
-            <div style="display:flex; align-items:flex-end;">
-              <button class="btn" style="width:100%;" onclick="saveAcademyConfig()">운영시간 설정 저장</button>
-            </div>
-          </div>
-          
-          <div style="margin-top:1rem; border-top:1px solid var(--border-color); padding-top:1rem;">
-            <label style="font-weight:700;">원생별 수강신청 수정 허용 제어 (수강 등록 기간 외 상시 수정 기능)</label>
-            <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.5rem;">
-              ${state.students.map(s => `
-                <div style="display:flex; justify-content:between; align-items:center; background:rgba(255,255,255,0.02); padding:0.4rem 0.8rem; border-radius:0.375rem;">
-                  <span>${s.name} (${s.school}, ${s.grade})</span>
-                  <div style="display:flex; gap:0.5rem; align-items:center;">
-                    <label style="margin:0; font-size:0.8rem;">수정 허용</label>
-                    <input type="checkbox" style="width:20px; height:20px; cursor:pointer;" ${s.isEditAllowed ? "checked" : ""} onchange="toggleStudentEditPermission('${s.id}', this.checked)">
-                  </div>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-        </div>
-      `;
-    }
+function changeGridDate(dateVal) {
+  state.selectedDate = dateVal;
+  renderEnrollments();
+}
 
-    // 학생 선택 셀렉트박스 (원장, 강사, 조교는 전체 학생 리스트, 학생은 본인 캘린더 조회)
-    const studentSelectDropdown = `
-      <div class="card">
-        <div class="card-title">수강 일정 조회할 학생 선택</div>
-        <div style="max-width:400px;">
-          <select id="timetableStudentSelect" onchange="changeTimetableStudent(this.value)">
-            ${state.students.map(s => `
-              <option value="${s.id}" ${s.id === state.selectedStudentId ? "selected" : ""}>
-                ${s.name} (${s.school}, ${s.grade})
-              </option>
-            `).join("")}
-          </select>
-        </div>
-      </div>
-    `;
+function toggleTimetableMode(mode) {
+  scheduleViewMode = mode;
+  renderEnrollments();
+}
 
-    // 학생/학부모 수강일정 등록 폼
-    // 현재 선택된 시뮬레이션 원생 정보 조회
-    const currentStudent = state.students.find(s => s.id === state.selectedStudentId);
-    
-    // 수강 기간 수정 가능 여부 판단
-    // 요구사항: 등록 기간(예: 매월 1일~7일 등)만 학생/학부모가 수정 가능하고, 원장은 상시 가능.
-    // 또한 원장이 학생별 수정 가능 여부(isEditAllowed)를 조정할 수 있음.
-    // 시뮬레이션 편의상 '매월 1일 ~ 15일'을 기본 "등록 기간"으로 정의하고, 이 기간 외에는 isEditAllowed가 true일 때만 학생이 수정할 수 있게 코딩합니다.
-    const currentDay = Number(state.selectedDate.split("-")[2]); // 날짜 일자
-    const isRegisterPeriod = currentDay >= 1 && currentDay <= 15; // 1~15일 등록 기간
-    const canStudentEdit = isRegisterPeriod || (currentStudent && currentStudent.isEditAllowed);
-    const hasModifyAccess = isDirector || (isStudent && canStudentEdit);
+// 원장이 학생 개별 수강신청 권한 변경 제어
+async function toggleStudentEditAccess() {
+  const allowed = document.getElementById("allowEditToggle").checked;
+  const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
+  if (!targetStudent) return;
+  
+  targetStudent.isEditAllowed = allowed;
+  
+  try {
+    await supabaseClient.from("agy_students").update({ data: targetStudent }).eq("id", targetStudent.id);
+    alert(`${targetStudent.name} 학생의 수강 수정 허용 여부가 ${allowed ? '허용' : '차단'} 상태로 설정되었습니다.`);
+    await loadAllData();
+    renderEnrollments();
+  } catch (err) {
+    console.error(err);
+  }
+}
 
-    let enrollmentForm = "";
-    if (currentStudent) {
-      enrollmentForm = `
-        <div class="card">
-          <div class="card-title">
-            <span>[${currentStudent.name}] 수강 신청 등록 / 예약</span>
-            ${isStudent ? (canStudentEdit ? `<span class="status-pill success">수정 가능 기간</span>` : `<span class="status-pill danger">수정 불가 기간 (원장 제한)</span>`) : `<span class="status-pill success">원장 상시 수정 가능</span>`}
-          </div>
-          
-          ${hasModifyAccess ? `
-            <div class="form-grid">
-              <div>
-                <label>등원 날짜</label>
-                <input type="date" id="enrolDate" value="${state.selectedDate}">
-              </div>
-              <div>
-                <label>시작 시간 (10분단위)</label>
-                <input type="time" step="600" id="enrolStart" value="14:00">
-              </div>
-              <div>
-                <label>종료 시간 (10분단위)</label>
-                <input type="time" step="600" id="enrolEnd" value="16:00">
-              </div>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div style="display:flex; gap:0.5rem; align-items:center;">
-                <input type="checkbox" id="enrolRepeat" style="width:18px; height:18px;">
-                <label for="enrolRepeat" style="margin:0;">주차별 반복 등록 (선택 요일 기준 해당월 남은 주차 일괄 적용)</label>
-              </div>
-              <button class="btn" onclick="saveEnrollment()">수강 등록</button>
-            </div>
-          ` : `
-            <p style="color:var(--text-muted);">현재 수강 수정 기간이 아닙니다. 변경이 필요하시면 원장님께 문의 바랍니다.</p>
-          `}
-        </div>
-      `;
-    }
-
-    // 캘린더 렌더링 (7월 캘린더 예시 구현)
-    const calendarHtml = generateCalendarView(currentStudent ? currentStudent.id : "");
-
-    contentHtml = `
-      ${configArea}
-      ${studentSelectDropdown}
-      ${enrollmentForm}
-      <div class="card">
-        <div class="card-title">${currentStudent ? `[${currentStudent.name}] 학생` : ""} 수강 스케줄 캘린더</div>
-        ${calendarHtml}
-      </div>
-    `;
-  } else if (state.timetableTab === "academyCalendar" && isDirector) {
-    // 학원 가동 시간 & 달력 휴일 설정 (원장 전용) - 달력을 넓게 보기 위해 상하 배치 구조로 개선
-    const academyCalendarHtml = generateAcademyCalendarView();
-    
-    const days = ["월", "화", "수", "목", "금", "토", "일"];
-    let dayConfigsHtml = days.map(day => {
-      const cfg = state.operatingConfigs.dayConfigs[day] || { active: day !== "일", start: "13:00", end: "22:00" };
-      return `
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.02); padding:0.6rem 1.2rem; border-radius:6px; border:1px solid var(--border-color);">
-          <div style="display:flex; gap:0.5rem; align-items:center;">
-            <input type="checkbox" id="day-active-${day}" ${cfg.active ? "checked" : ""} style="width:18px; height:18px; cursor:pointer;">
-            <span style="font-weight:700; width:50px;">${day}요일</span>
-          </div>
-          <div style="display:flex; gap:0.5rem; align-items:center;">
-            <input type="time" id="day-start-${day}" value="${cfg.start}" style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;">
-            <span>~</span>
-            <input type="time" id="day-end-${day}" value="${cfg.end}" style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;">
-          </div>
-        </div>
-      `;
-    }).join("");
-
-    contentHtml = `
-      <div style="display:flex; flex-direction:column; gap:1.5rem;">
-        <div>
-          ${academyCalendarHtml}
-        </div>
-        <div class="card">
-          <div class="card-title">요일별 가동 시간 상세 설정</div>
-          <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:0.8rem;">
-            ${dayConfigsHtml}
-          </div>
-          <button class="btn" style="width:100%; margin-top:1.5rem;" onclick="saveAcademyDayConfigs()"><i data-lucide="save"></i> 요일 운영 정보 저장</button>
-        </div>
-      </div>
-    `;
-  } else if (state.timetableTab === "dailyList") {
-    // 일별 등록표 (가로: 학년군, 세로: 시간 그리드)
-    const isHoliday = state.operatingConfigs.holidays && state.operatingConfigs.holidays.includes(state.selectedDate);
-    
-    if (isHoliday) {
-      contentHtml = `
-        <div class="card" style="text-align:center; padding:4rem 1rem; border:2px dashed var(--danger-color); background:rgba(239, 68, 68, 0.02);">
-          <div style="font-size:3.5rem; margin-bottom:1rem;">🚨</div>
-          <h3 style="color:var(--danger-color); font-weight:700; font-size:1.3rem;">원장님이 설정한 학원 공식 휴일입니다.</h3>
-          <p style="color:var(--text-secondary); margin-top:0.75rem; font-size:1rem;">[ ${state.selectedDate} ] 날짜는 학원 휴무일로 지정되어 오늘 등원 및 수강 일정이 존재하지 않습니다.</p>
-        </div>
-      `;
-      container.innerHTML = `
-        <h1 class="no-print">수강 및 시간표관리</h1>
-        <div class="tabs no-print">${tabButtonsHtml}</div>
-        ${contentHtml}
-      `;
-      lucide.createIcons();
+// 캘린더 날짜 클릭 시 수강신청 등록/수정 모달창 처리
+function handleCalendarDateClick(dateStr, isHoliday) {
+  if (isHoliday) {
+    alert("지정된 학원 휴무일에는 수강을 신청할 수 없습니다.");
+    return;
+  }
+  
+  // 권한 검증: 학생/학부모인 경우, 원장이 개별적으로 수강 수정을 허용해 주었는지(isEditAllowed) 체크
+  if (state.currentUser.role === 'student') {
+    const studentInfo = state.students.find(s => s.id === state.currentUser.ref_id);
+    if (studentInfo && !studentInfo.isEditAllowed) {
+      alert("현재 수강 수정 기간이 아닙니다. 수정을 원하시면 원장실에 문의해 주세요.");
       return;
     }
+  }
+  
+  // 이 날짜의 기존 수강신청이 있는지 확인
+  const existing = state.enrollments.find(e => e.studentId === enrollSelectedStudentId && e.date === dateStr);
+  const startVal = existing ? existing.startTime : "13:00";
+  const endVal = existing ? existing.endTime : "14:30";
+  
+  openModal(`
+    <div class="modal-header">
+      <h3>수강 일정 등록/수정 (${dateStr})</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:14px; font-size:12px; color:var(--text-muted);">
+        * 운영 가동시간 범위 외에는 자동으로 수강 신청이 거부됩니다.
+      </div>
+      <div style="display:flex; gap:12px;">
+        <div class="form-group" style="flex:1;">
+          <label>시작 시간 (10분 단위)</label>
+          <input type="time" id="enrStart" step="600" value="${startVal}" onchange="alignToTenMinutes(this)">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>종료 시간 (10분 단위)</label>
+          <input type="time" id="enrEnd" step="600" value="${endVal}" onchange="alignToTenMinutes(this)">
+        </div>
+      </div>
+      
+      <!-- 주차별 반복 체크박스 -->
+      <div style="margin:16px 0; display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="enrRepeat" style="width:16px; height:16px;">
+        <label for="enrRepeat" style="font-weight:700; font-size:13px; cursor:pointer;">이 요일로 해당월(${opsYearMonth}) 반복하여 일괄 자동 등록</label>
+      </div>
+      
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        ${existing ? `<button class="btn btn-danger" style="flex:1; justify-content:center;" onclick="deleteEnrollment('${existing.id}')">수강 취소</button>` : ''}
+        <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="handleSaveEnrollment('${dateStr}')">일정 저장</button>
+      </div>
+    </div>
+  `);
+}
+
+async function handleSaveEnrollment(dateStr) {
+  const startTime = document.getElementById("enrStart").value;
+  const endTime = document.getElementById("enrEnd").value;
+  const repeat = document.getElementById("enrRepeat").checked;
+  
+  // 1. 운영 관리 시간 제한 규칙 적용 (휴무일 및 운영시간 외부 차단)
+  const [ymYear, ymMonth] = opsYearMonth.split("-");
+  const monthOps = state.monthlyOperations[opsYearMonth] || {};
+  
+  // 반복 적용 대상 날짜 리스트 결정
+  let targetDates = [dateStr];
+  if (repeat) {
+    targetDates = [];
+    const clickedDay = new Date(dateStr).getDay(); // 요일 (0~6)
+    const [y, m] = opsYearMonth.split("-").map(Number);
+    const totalDays = new Date(y, m, 0).getDate();
     
-    const dailyEnrollments = state.enrollments.filter(e => e.date === state.selectedDate);
-
-    // 학원 운영시간 기준 30분 단위 슬롯 생성
-    const startHour = Number(state.operatingConfigs.startTime.split(":")[0]);
-    const endHour = Number(state.operatingConfigs.endTime.split(":")[0]);
-    const slots = [];
-    for (let h = startHour; h < endHour; h++) {
-      slots.push(`${String(h).padStart(2, '0')}:00`);
-      slots.push(`${String(h).padStart(2, '0')}:30`);
+    for (let d = 1; d <= totalDays; d++) {
+      const loopDate = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
+      if (new Date(loopDate).getDay() === clickedDay) {
+        targetDates.push(loopDate);
+      }
     }
-    slots.push(`${String(endHour).padStart(2, '0')}:00`); // 종료 한계
-
-    // 학년군 매핑 정보
-    const gradeGroups = ["초등 저", "초등 고", "중등", "고등"];
-    const gradeHeaderLabels = ["초등 저 (1~4학년)", "초등 고 (5~6학년)", "중등부", "고등부"];
-
-    // 그리드 행 생성
-    let gridRowsHtml = "";
-
-    // 헤더 행
-    gridRowsHtml += `<div class="grid-header-cell">시간</div>`;
-    gradeHeaderLabels.forEach(label => {
-      gridRowsHtml += `<div class="grid-header-cell">${label}</div>`;
+  }
+  
+  // 시간 유효성 확인
+  const isTimeInvalid = targetDates.some(dt => {
+    const op = monthOps[dt] || { isHoliday: false, start: "13:00", end: "22:00" };
+    if (op.isHoliday) return true;
+    return startTime < op.start || endTime > op.end;
+  });
+  
+  if (isTimeInvalid) {
+    alert("신청 시간 오류: 휴무일이거나 설정된 학원 운영시간 범위를 초과하여 수강 일정을 예약할 수 없습니다.");
+    return;
+  }
+  
+  try {
+    const upserts = targetDates.map(dt => {
+      const id = `enr-${enrollSelectedStudentId}-${dt}`;
+      const data = {
+        id,
+        studentId: enrollSelectedStudentId,
+        date: dt,
+        startTime,
+        endTime
+      };
+      return supabaseClient.from("agy_enrollments").upsert([{ id, data }]);
     });
+    
+    await Promise.all(upserts);
+    alert("수강 일정이 성공적으로 등록되었습니다.");
+    await loadAllData();
+    closeModal();
+    renderEnrollments();
+  } catch (err) {
+    console.error(err);
+  }
+}
 
-    // 각 시간 슬롯별 행 구성
-    for (let i = 0; i < slots.length - 1; i++) {
-      const slotStart = slots[i];
-      const slotEnd = slots[i + 1];
+async function deleteEnrollment(id) {
+  if (confirm("해당 수강신청을 취소(삭제)하시겠습니까?")) {
+    try {
+      await supabaseClient.from("agy_enrollments").delete().eq("id", id);
+      alert("수강 일정이 취소되었습니다.");
+      await loadAllData();
+      closeModal();
+      renderEnrollments();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+}
 
-      // 시간 컬럼
-      gridRowsHtml += `<div class="grid-time-cell">${slotStart} ~ ${slotEnd}</div>`;
+// 학년군 분류 헬퍼
+function getGradeGroup(gradeStr) {
+  if (["1", "2", "3", "4"].includes(gradeStr)) {
+    return "초등저학년";
+  } else if (["5", "6"].includes(gradeStr)) {
+    return "초등고학년";
+  } else if (gradeStr && gradeStr.startsWith("중")) {
+    return "중등";
+  } else if (gradeStr && gradeStr.startsWith("고")) {
+    return "고등";
+  }
+  return "기타";
+}
 
-      // 각 학년군 컬럼
-      gradeGroups.forEach(group => {
-        // 이 슬롯 시간대에 중복되는 해당 학년군 학생 수강 신청 필터링
-        const matched = dailyEnrollments.filter(e => {
-          const s = state.students.find(st => st.id === e.studentId);
-          if (!s) return false;
+// 대형 그리드 렌더러
+function renderGridTimetable() {
+  const target = document.getElementById("timetableGridTarget");
+  
+  // 세로 시간 축 범위 생성 (30분 간격, 학원 운영 기준 13:00 ~ 22:00)
+  const startHour = 13;
+  const endHour = 22;
+  const timeSlots = [];
+  
+  for (let h = startHour; h < endHour; h++) {
+    timeSlots.push(`${String(h).padStart(2, "0")}:00`);
+    timeSlots.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  timeSlots.push("22:00");
+  
+  // 가로 학년군 그룹
+  const gradeGroups = ["초등저학년", "초등고학년", "중등", "고등"];
+  
+  // 데이터 선별
+  const targetDate = state.selectedDate;
+  const enrollsToday = state.enrollments.filter(e => e.date === targetDate);
+  
+  if (scheduleViewMode === "daily") {
+    // --- 일별 그리드 렌더링 ---
+    let tableHTML = `
+      <div class="timetable-grid-container">
+        <table class="timetable-grid-table">
+          <thead>
+            <tr>
+              <th class="timetable-time-col">운영 시간</th>
+              <th>초등 저 (1~4학년)</th>
+              <th>초등 고 (5,6학년)</th>
+              <th>중등부</th>
+              <th>고등부</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+    
+    // 각 시간 슬롯별 행 생성
+    for (let t = 0; t < timeSlots.length - 1; t++) {
+      const slotStart = timeSlots[t];
+      const slotEnd = timeSlots[t + 1];
+      
+      tableHTML += `<tr><td class="timetable-time-col">${slotStart} ~ ${slotEnd}</td>`;
+      
+      // 학년군별 컬럼 데이터 매핑
+      gradeGroups.forEach(grp => {
+        // 해당 날짜, 해당 학년군에 해당하는 학생 중 이 30분 슬롯 시간대에 걸쳐 수강하는 학생 추출
+        const matchingStudents = enrollsToday.filter(enr => {
+          const st = state.students.find(s => s.id === enr.studentId);
+          if (!st) return false;
           
-          const sGroup = getGradeGroup(s.grade);
-          if (sGroup !== group) return false;
-
-          // 겹침 판정: 수강 시작 < slotEnd && 수강 종료 > slotStart
-          return e.startTime < slotEnd && e.endTime > slotStart;
+          const stGrp = getGradeGroup(st.grade);
+          if (stGrp !== grp) return false;
+          
+          // 겹침 검증: [startTime, endTime] 이 [slotStart, slotEnd] 와 겹치는지 체크
+          return (enr.startTime < slotEnd && enr.endTime > slotStart);
         });
-
-        let studentsHtml = matched.map(e => {
-          const student = state.students.find(s => s.id === e.studentId);
-          const isNew = isNewStudent(student.registeredDate);
+        
+        let badgesHTML = matchingStudents.map(enr => {
+          const st = state.students.find(s => s.id === enr.studentId);
+          const isNew = isStudentNew(st.registeredDate);
+          const nameClass = isNew ? "name new-student-highlight" : "name";
+          
           return `
-            <div class="grid-student-badge">
-              <span class="grid-student-name ${isNew ? 'new-student' : ''}">${student.name}</span>
-              <div class="grid-student-time">${e.startTime}~${e.endTime}</div>
+            <div class="timetable-card-badge">
+              <span class="${nameClass}">${escapeHTML(st.name)}</span>
+              <span class="time-text">${enr.startTime}~${enr.endTime}</span>
             </div>
           `;
         }).join("");
-
-        gridRowsHtml += `<div class="grid-content-cell">${studentsHtml}</div>`;
+        
+        tableHTML += `<td>${badgesHTML}</td>`;
       });
+      
+      tableHTML += `</tr>`;
     }
-
-    contentHtml = `
-      <div class="card">
-        <div class="card-title">일별 시간표 그리드 조회 (${state.selectedDate})</div>
-        <div style="margin-bottom:1rem; font-size:0.85rem; color:var(--text-secondary);">
-          * 세로축은 30분 단위 시간 흐름이며, 가로축은 학년군별 카테고리입니다.<br>
-          * 등록일 3개월 미만인 신규 원생은 <strong>초록색 굵은 폰트</strong>로 표시됩니다.
-        </div>
-        <div class="grid-timetable">
-          ${gridRowsHtml}
-        </div>
-      </div>
-    `;
-  } else if (state.timetableTab === "weeklyList") {
-    // 주간 등록표
-    // 선택된 날짜가 속한 주의 월요일~토요일 구하기
-    const baseDate = new Date(state.selectedDate);
-    const dayOfWeek = baseDate.getDay(); // 0(일)~6(토)
-    const mondayDiff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const monday = new Date(baseDate);
-    monday.setDate(baseDate.getDate() + mondayDiff);
-
-    const weekDays = [];
-    const weekDaysStr = [];
+    
+    tableHTML += `</tbody></table></div>`;
+    target.innerHTML = tableHTML;
+    
+  } else {
+    // --- 주간 그리드 렌더링 ---
+    // 선택된 일자의 월~토(일주간)를 탐색
+    const current = new Date(state.selectedDate);
+    const day = current.getDay();
+    const distanceToMon = day === 0 ? -6 : 1 - day; // 월요일 기준 계산
+    const monday = new Date(current.setDate(current.getDate() + distanceToMon));
+    
+    const weekdays = [];
     const dayNames = ["월", "화", "수", "목", "금", "토"];
-
     for (let i = 0; i < 6; i++) {
       const d = new Date(monday);
       d.setDate(monday.getDate() + i);
-      const yr = d.getFullYear();
-      const mo = String(d.getMonth() + 1).padStart(2, '0');
-      const dy = String(d.getDate()).padStart(2, '0');
-      const dateStr = `${yr}-${mo}-${dy}`;
-      weekDays.push(d);
-      weekDaysStr.push(dateStr);
+      weekdays.push(d.toISOString().split("T")[0]);
     }
-
-    // 각 요일별 데이터
-    let weeklyHtml = "";
     
-    // 학년군별 그룹화하여 요일별 스케줄을 테이블 형태로 구성
-    const gradeLevels = ["초등 저", "초등 고", "중등", "고등"];
-    const gradeTitles = ["초등 저 (1~4학년)", "초등 고 (5~6학년)", "중등부", "고등부"];
-
-    gradeLevels.forEach((level, idx) => {
-      weeklyHtml += `<div class="grade-group-title" style="margin-top:1.5rem;">${gradeTitles[idx]}</div>`;
-      
-      let rowsHtml = "";
-      // 해당 학년군 학생들
-      const levelStudents = state.students.filter(s => getGradeGroup(s.grade) === level);
-
-      levelStudents.forEach(st => {
-        const isNew = isNewStudent(st.registeredDate);
-        const nameClass = isNew ? "new-student" : "";
-        
-        let colsHtml = `<td><span class="${nameClass}">${st.name}</span></td>`;
-        
-        weekDaysStr.forEach(dStr => {
-          const enroll = state.enrollments.find(e => e.studentId === st.id && e.date === dStr);
-          if (enroll) {
-            colsHtml += `<td><span style="font-size:0.75rem; color:var(--accent); font-weight:700;">${enroll.startTime}~${enroll.endTime}</span></td>`;
-          } else {
-            colsHtml += `<td><span style="color:var(--text-muted); font-size:0.75rem;">-</span></td>`;
-          }
-        });
-
-        rowsHtml += `<tr>${colsHtml}</tr>`;
-      });
-
-      if (levelStudents.length === 0) {
-        weeklyHtml += `<p style="padding-left:1rem; color:var(--text-muted); font-size:0.85rem;">해당 학년군에 소속된 수강생이 없습니다.</p>`;
-      } else {
-        weeklyHtml += `
-          <div style="overflow-x:auto; margin-bottom:1rem;">
-            <table>
-              <thead>
-                <tr>
-                  <th>학생명</th>
-                  ${weekDaysStr.map((dStr, i) => {
-                    const dayNum = dStr.split("-")[2];
-                    return `<th>${dayNames[i]} (${dayNum}일)</th>`;
-                  }).join("")}
-                </tr>
-              </thead>
-              <tbody>
-                ${rowsHtml}
-              </tbody>
-            </table>
-          </div>
-        `;
-      }
-    });
-
-    contentHtml = `
-      <div class="card">
-        <div class="card-title">주간 등록표 조회 (${weekDaysStr[0]} ~ ${weekDaysStr[5]})</div>
-        <div>
-          ${weeklyHtml}
-        </div>
-      </div>
+    let tableHTML = `
+      <div class="timetable-grid-container">
+        <table class="timetable-grid-table">
+          <thead>
+            <tr>
+              <th class="timetable-time-col">운영 시간</th>
+              ${weekdays.map((date, idx) => `<th>${dayNames[idx]}요일 (${date.substring(5)})</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
     `;
+    
+    for (let t = 0; t < timeSlots.length - 1; t++) {
+      const slotStart = timeSlots[t];
+      const slotEnd = timeSlots[t + 1];
+      
+      tableHTML += `<tr><td class="timetable-time-col">${slotStart} ~ ${slotEnd}</td>`;
+      
+      // 요일별 컬럼
+      weekdays.forEach(date => {
+        const enrollsThisDay = state.enrollments.filter(e => e.date === date);
+        const matching = enrollsThisDay.filter(enr => {
+          return (enr.startTime < slotEnd && enr.endTime > slotStart);
+        });
+        
+        let badgesHTML = matching.map(enr => {
+          const st = state.students.find(s => s.id === enr.studentId);
+          if (!st) return "";
+          const isNew = isStudentNew(st.registeredDate);
+          const nameClass = isNew ? "name new-student-highlight" : "name";
+          
+          return `
+            <div class="timetable-card-badge" style="margin-bottom:4px;">
+              <span class="${nameClass}">${escapeHTML(st.name)}</span>
+              <span class="time-text">${enr.startTime}~${enr.endTime}</span>
+            </div>
+          `;
+        }).join("");
+        
+        tableHTML += `<td>${badgesHTML}</td>`;
+      });
+      
+      tableHTML += `</tr>`;
+    }
+    
+    tableHTML += `</tbody></table></div>`;
+    target.innerHTML = tableHTML;
   }
+}
+
+
+// --- ⑥ 진도 관리 뷰 ---
+let progressTab = "plan"; // plan: 당일계획수립, result: 당일실적등록, stats: 진도이력조회
+
+function renderProgress() {
+  const container = document.getElementById("mainContent");
+  
+  // 로그인 학생인 경우 타겟 자동 고정
+  let progressStudentId = "";
+  if (state.currentUser.role === 'student') {
+    progressStudentId = state.currentUser.ref_id;
+  } else if (state.students.length > 0) {
+    progressStudentId = state.students[0].id;
+  }
+  
+  // 드롭다운 리스트
+  const studentOptions = state.students.map(s => `
+    <option value="${s.id}" ${progressStudentId === s.id ? 'selected' : ''}>${escapeHTML(s.name)}</option>
+  `).join("");
 
   container.innerHTML = `
-    <h1>수강 및 시간표관리</h1>
-    <div class="tabs no-print">
-      ${tabButtonsHtml}
+    <div class="page-header">
+      <div class="page-title">
+        <h1>당일 진도 계획 / 실적 관리</h1>
+        <p>등원 시 계획을 등록하고, 퇴실 시 실적을 기입하여 최종 확정 인쇄합니다.</p>
+      </div>
+      <div class="action-bar">
+        <button class="btn btn-secondary no-print" onclick="window.print()"><i data-lucide="printer"></i> 진도표 인쇄하기</button>
+      </div>
     </div>
-    ${contentHtml}
-  `;
-  lucide.createIcons();
-}
-
-window.switchTimetableTab = function(tabName) {
-  state.timetableTab = tabName;
-  navigate("timetable");
-};
-
-// 7월 예시 캘린더 생성기
-function generateCalendarView(studentId) {
-  // 2026년 7월 고정 (시뮬레이션 중심 월)
-  const year = 2026;
-  const month = 6; // 0-based index: 7월
-  const firstDay = new Date(year, month, 1).getDay(); // 시작 요일
-  const lastDate = new Date(year, month + 1, 0).getDate(); // 마지막 날짜
-
-  let html = `
-    <div class="calendar-container">
-      <div class="calendar-header">일</div>
-      <div class="calendar-header">월</div>
-      <div class="calendar-header">화</div>
-      <div class="calendar-header">수</div>
-      <div class="calendar-header">목</div>
-      <div class="calendar-header">금</div>
-      <div class="calendar-header">토</div>
-  `;
-
-  // 이전 달 채우기 빈칸
-  for (let i = 0; i < firstDay; i++) {
-    html += `<div class="calendar-day other-month"><span class="calendar-date-number"></span></div>`;
-  }
-
-  // 이번 달 일자 채우기
-  for (let d = 1; d <= lastDate; d++) {
-    const dStr = `2026-07-${String(d).padStart(2, '0')}`;
-    const dayEnrollments = state.enrollments.filter(e => e.studentId === studentId && e.date === dStr);
-    const isHoliday = state.operatingConfigs.holidays && state.operatingConfigs.holidays.includes(dStr);
     
-    let eventsHtml = dayEnrollments.map(e => `
-      <div class="calendar-event" onclick="deleteEnrollment('${e.id}')">
-        ${e.startTime}-${e.endTime} ❌
-      </div>
-    `).join("");
-
-    const isToday = dStr === state.selectedDate ? "border: 2px solid var(--accent);" : "";
-
-    html += `
-      <div class="calendar-day ${isHoliday ? 'is-holiday-cell' : ''}" style="${isToday} ${isHoliday ? 'background:rgba(239, 68, 68, 0.05);' : ''}">
-        <span class="calendar-date-number" style="${isHoliday ? 'color:var(--danger-color); font-weight:700;' : ''}">${d}</span>
-        ${isHoliday 
-          ? `<div style="color:var(--danger-color); font-size:0.75rem; font-weight:700; padding:0.1rem 0.2rem; border-radius:4px; text-align:center; background:rgba(239,68,68,0.1); margin-top:0.25rem;">학원 휴무</div>` 
-          : `<div style="display:flex; flex-direction:column; gap:0.2rem; margin-top:0.25rem;">${eventsHtml}</div>`}
-      </div>
-    `;
-  }
-
-  // 다음 달 채우기
-  const totalSlots = firstDay + lastDate;
-  const remaining = 35 - totalSlots; // 5주 기준
-  const finalRemaining = remaining >= 0 ? remaining : 42 - totalSlots;
-  for (let i = 0; i < finalRemaining; i++) {
-    html += `<div class="calendar-day other-month"><span class="calendar-date-number"></span></div>`;
-  }
-
-  html += `</div>`;
-  return html;
+    <div class="tabs-navigation no-print">
+      <button class="tab-btn ${progressTab === 'plan' ? 'active' : ''}" onclick="toggleProgressTab('plan')">📝 당일 계획 수립</button>
+      <button class="tab-btn ${progressTab === 'result' ? 'active' : ''}" onclick="toggleProgressTab('result')">🏆 당일 실적 등록</button>
+    </div>
+    
+    <div style="display:flex; gap:12px; margin-bottom:20px; align-items:center;" class="no-print">
+      <strong>학생 선택:</strong>
+      <select id="progressStSelector" onchange="changeProgressStudent(this.value)" ${state.currentUser.role === 'student' ? 'disabled' : ''} style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+        ${studentOptions}
+      </select>
+      
+      <strong>날짜 선택:</strong>
+      <input type="date" id="progressDateSelector" value="${state.selectedDate}" onchange="changeProgressDate(this.value)" style="padding:6px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+    </div>
+    
+    <div id="progressTabContent"></div>
+  `;
+  
+  if (window.lucide) window.lucide.createIcons();
+  
+  renderProgressTabContent(progressStudentId);
 }
 
-// 원장: 학원 운영 정보 수정
-window.saveAcademyConfig = function() {
-  const start = document.getElementById("opStart").value;
-  const end = document.getElementById("opEnd").value;
+function toggleProgressTab(tab) {
+  progressTab = tab;
+  renderProgress();
+}
 
-  if (calculateDuration(start, end) <= 0) {
-    alert("운영 시작시간은 종료시간보다 빨라야 합니다.");
+function changeProgressStudent(stId) {
+  renderProgressTabContent(stId);
+}
+
+function changeProgressDate(dateVal) {
+  state.selectedDate = dateVal;
+  renderProgress();
+}
+
+// 탭 세부 콘텐츠 렌더러
+function renderProgressTabContent(studentId) {
+  const target = document.getElementById("progressTabContent");
+  const st = state.students.find(s => s.id === studentId);
+  if (!st) {
+    target.innerHTML = `<p>등록된 학생 데이터가 없습니다.</p>`;
     return;
   }
-
-  state.operatingConfigs.startTime = start;
-  state.operatingConfigs.endTime = end;
-  saveStateToStorage();
-  alert("학원 운영시간 정보가 성공적으로 반영되었습니다.");
-  navigate("timetable");
-};
-
-// 원장: 학생별 수강 권한 스위칭
-window.toggleStudentEditPermission = function(studentId, isChecked) {
-  const idx = state.students.findIndex(s => s.id === studentId);
-  if (idx >= 0) {
-    state.students[idx].isEditAllowed = isChecked;
-    saveStateToStorage();
-  }
-};
-
-// 학생/학부모: 수강 일정 추가 (10분 단위 검증 및 휴일/가동일시 필터 적용)
-window.saveEnrollment = function() {
-  const date = document.getElementById("enrolDate").value;
-  const start = document.getElementById("enrolStart").value;
-  const end = document.getElementById("enrolEnd").value;
-  const isRepeat = document.getElementById("enrolRepeat").checked;
-
-  if (!date || !start || !end) {
-    alert("수강 일자 및 시간을 모두 선택해 주세요.");
-    return;
-  }
-
-  // 1. 학원 공식 휴무일 체크
-  const isHoliday = state.operatingConfigs.holidays && state.operatingConfigs.holidays.includes(date);
-  if (isHoliday) {
-    alert("선택하신 날짜는 학원 공식 휴무일로 설정되어 있어 수강 신청이 불가능합니다.");
-    return;
-  }
-
-  // 2. 요일별 가동 여부 및 요일별 개별 가동시간대 범위 검증
-  const curDate = new Date(date);
-  const weekDays = ["일", "월", "화", "수", "목", "금", "토"];
-  const dayLabel = weekDays[curDate.getDay()];
-  const dayCfg = state.operatingConfigs.dayConfigs[dayLabel] || { active: dayLabel !== "일", start: "13:00", end: "22:00" };
-
-  if (!dayCfg.active) {
-    alert(`죄송합니다. ${dayLabel}요일은 학원 비가동일(휴무 요일)입니다. 다른 날짜를 선택해 주세요.`);
-    return;
-  }
-
-  if (start < dayCfg.start || end > dayCfg.end) {
-    alert(`해당 요일(${dayLabel}요일)의 학원 가동 시간은 ${dayCfg.start} ~ ${dayCfg.end} 입니다. 이 운영 시간 범위 안에서 신청해 주세요.`);
-    return;
-  }
-
-  // 3. 10분 단위 검증
-  const [sH, sM] = start.split(":").map(Number);
-  const [eH, eM] = end.split(":").map(Number);
-  if (sM % 10 !== 0 || eM % 10 !== 0) {
-    alert("수강 시간은 10분 단위로만 신청 가능합니다.");
-    return;
-  }
-
-  if (calculateDuration(start, end) <= 0) {
-    alert("종료 시간은 시작 시간 이후여야 합니다.");
-    return;
-  }
-
-  const baseEnrollment = {
-    id: "en-" + Date.now(),
-    studentId: state.selectedStudentId,
-    date,
-    startTime: start,
-    endTime: end
-  };
-
-  // 기존 해당 일자 수강일정이 있으면 삭제
-  const existingIdx = state.enrollments.findIndex(e => e.studentId === state.selectedStudentId && e.date === date);
-  if (existingIdx >= 0) {
-    state.enrollments.splice(existingIdx, 1);
-  }
-
-  state.enrollments.push(baseEnrollment);
-
-  // 주차별 반복 등록 로직
-  if (isRepeat) {
-    const month = curDate.getMonth();
-    const year = curDate.getFullYear();
-    const targetDay = curDate.getDay();
-
-    // 당월의 모든 동일 요일 찾아서 저장
-    for (let d = 1; d <= 31; d++) {
-      const iterDate = new Date(year, month, d);
-      if (iterDate.getMonth() !== month) break; // 월이 넘어가면 종료
-      if (iterDate.getDay() === targetDay && d !== curDate.getDate()) {
-        const yr = iterDate.getFullYear();
-        const mo = String(iterDate.getMonth() + 1).padStart(2, '0');
-        const dy = String(iterDate.getDate()).padStart(2, '0');
-        const dateStr = `${yr}-${mo}-${dy}`;
-
-        // 반복 적용할 일자가 학원 공식 휴일이거나 해당 요일이 비가동 요일이면 스킵
-        const dupHoliday = state.operatingConfigs.holidays && state.operatingConfigs.holidays.includes(dateStr);
-        const iterDayLabel = weekDays[iterDate.getDay()];
-        const iterCfg = state.operatingConfigs.dayConfigs[iterDayLabel] || { active: iterDayLabel !== "일", start: "13:00", end: "22:00" };
-
-        if (dupHoliday || !iterCfg.active) {
-          continue;
-        }
-
-        // 중복 제거 후 푸시
-        const dupIdx = state.enrollments.findIndex(e => e.studentId === state.selectedStudentId && e.date === dateStr);
-        if (dupIdx >= 0) {
-          state.enrollments.splice(dupIdx, 1);
-        }
-
-        state.enrollments.push({
-          id: `en-${Date.now()}-${d}`,
-          studentId: state.selectedStudentId,
-          date: dateStr,
-          startTime: start,
-          endTime: end
-        });
-      }
-    }
-  }
-
-  saveStateToStorage();
-  alert("수강 일정이 성공적으로 등록되었습니다.");
-  navigate("timetable");
-};
-
-// 수강 일정 삭제 기능 (캘린더 내 X 아이콘 클릭 시 작동)
-window.deleteEnrollment = function(enrolId) {
-  const currentStudent = state.students.find(s => s.id === state.selectedStudentId);
-  const currentDay = Number(state.selectedDate.split("-")[2]);
-  const isRegisterPeriod = currentDay >= 1 && currentDay <= 15;
-  const canStudentEdit = isRegisterPeriod || (currentStudent && currentStudent.isEditAllowed);
-
-  if (state.currentRole !== "director" && !canStudentEdit) {
-    alert("현재 수강 수정 권한이 없습니다. 원장님께 문의해 주세요.");
-    return;
-  }
-
-  if (confirm("해당 수강 일정을 취소하시겠습니까?")) {
-    state.enrollments = state.enrollments.filter(e => e.id !== enrolId);
-    saveStateToStorage();
-    navigate("timetable");
-  }
-};
-
-window.changeTimetableStudent = function(studentId) {
-  state.selectedStudentId = studentId;
-  saveStateToStorage();
-  renderSidebar(); // 사이드바 시뮬레이션 계정도 동기화
-  navigate("timetable");
-};
-
-
-// ==========================================
-// 5-5. 진도 관리 뷰
-// ==========================================
-// ==========================================
-// 5-5. 진도 계획 및 실적 관리 뷰
-// ==========================================
-function renderProgress(container) {
-  const isDirector = state.currentRole === "director";
-  const isTeacher = state.currentRole === "teacher";
-  const isAssistant = state.currentRole === "assistant";
-  const isStudent = state.currentRole === "student";
-  const canManage = isDirector || isTeacher || isAssistant;
-
-  // 진도관리 상단 서브 탭 HTML
-  let progressTabsHtml = `
-    <div class="tabs no-print">
-      <button class="tab-btn ${state.progressTab === 'plan' ? 'active' : ''}" onclick="switchProgressTab('plan')">당일 계획 수립</button>
-      <button class="tab-btn ${state.progressTab === 'performance' ? 'active' : ''}" onclick="switchProgressTab('performance')">당일 실적 등록</button>
-    </div>
-  `;
-
-  let contentHtml = "";
-
-  if (isStudent) {
-    const currentStudent = state.students.find(s => s.id === state.selectedStudentId);
-    const myPlans = state.dailyPlans.filter(dp => dp.studentId === state.selectedStudentId && dp.date === state.selectedDate);
-
-    // 미완료 이월 기능
-    if (myPlans.length === 0) {
-      const uncompletedPastPlans = state.dailyPlans.filter(dp => 
-        dp.studentId === state.selectedStudentId && 
-        dp.date < state.selectedDate && 
-        dp.isCompleted === false
-      );
-      if (uncompletedPastPlans.length > 0) {
-        uncompletedPastPlans.forEach((p, idx) => {
-          state.dailyPlans.push({
-            id: `dp-auto-${Date.now()}-${idx}`,
-            studentId: state.selectedStudentId,
-            date: state.selectedDate,
-            activityName: `[이월] ${p.activityName}`,
-            plannedStartTime: p.plannedStartTime,
-            plannedEndTime: p.plannedEndTime,
-            plannedDuration: p.plannedDuration,
-            actualStartTime: "",
-            actualEndTime: "",
-            isCompleted: false,
-            isConfirmed: false
-          });
-        });
-        saveStateToStorage();
-        navigate("progress");
-        return;
-      }
-    }
-
-    if (state.progressTab === "plan") {
-      // 1-A. 학생 모드: 계획 수립
-      let planRowsHtml = "";
-      for (let i = 0; i < 20; i++) {
-        const plan = myPlans[i];
-        const seq = i + 1;
-        
-        if (plan) {
-          planRowsHtml += `
-            <div class="plan-row" style="opacity: 0.7;">
-              <div><strong>${seq}.</strong> ${plan.activityName}</div>
-              <div>계획: ${plan.plannedStartTime} ~ ${plan.plannedEndTime}</div>
-              <div colspan="4" style="color:var(--text-secondary); font-size:0.8rem; text-align:center;">
-                계획 수립 완료 (실적은 실적 등록 탭에서 입력하세요)
-              </div>
-            </div>
-          `;
-        } else {
-          planRowsHtml += `
-            <div class="plan-row" style="background:rgba(0,0,0,0.02);">
-              <div><strong>${seq}.</strong> <input type="text" id="new-act-name-${seq}" placeholder="활동명 입력" style="padding:0.3rem;"></div>
-              <div>시작: <input type="time" step="600" id="new-act-start-${seq}" style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;" onchange="updateNewDuration(${seq})"></div>
-              <div>종료: <input type="time" step="600" id="new-act-end-${seq}" style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;" onchange="updateNewDuration(${seq})"></div>
-              <div id="new-act-dur-${seq}">0분</div>
-              <div colspan="2" style="color:var(--text-muted); font-size:0.8rem; text-align:center;">일괄 등록 대기</div>
-            </div>
-          `;
-        }
-      }
-
-      contentHtml = `
-        <div class="card">
-          <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>오늘 [${currentStudent ? currentStudent.name : ""}] 학생 당일 계획 수립 (${state.selectedDate})</span>
-            <button class="btn btn-sm" onclick="saveAllNewProgressPlans()"><i data-lucide="save"></i> 계획 일괄 등록</button>
-          </div>
-          <div class="plan-list-editor">
-            <div class="plan-header-row">
-              <div>활동 내용 (최대 20개)</div>
-              <div>계획 시간</div>
-              <div colspan="4" style="text-align:center;">상태</div>
-            </div>
-            ${planRowsHtml}
-          </div>
-          <div style="margin-top: 1.5rem; text-align: right;">
-            <button class="btn" onclick="saveAllNewProgressPlans()"><i data-lucide="save"></i> 당일 계획 일괄 등록/저장</button>
-          </div>
+  
+  // 오늘 날짜 계획 리스트 필터링
+  const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
+  
+  const isStudent = state.currentUser.role === 'student';
+  
+  if (progressTab === "plan") {
+    // --- 1. 당일 계획 수립 탭 ---
+    
+    let planInputs = "";
+    // 이미 등록된 계획이 있는 경우 리스트 표출
+    if (plansToday.length > 0) {
+      planInputs = plansToday.map((p, idx) => `
+        <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+          <span style="font-weight:700; width:30px;">#${idx + 1}</span>
+          <input type="text" value="${escapeHTML(p.activityName)}" disabled style="flex:2; padding:8px;">
+          <input type="time" value="${p.plannedStartTime}" disabled style="flex:1; padding:8px;">
+          <input type="time" value="${p.plannedEndTime}" disabled style="flex:1; padding:8px;">
+          <span style="font-size:12px; font-weight:700; width:70px; text-align:center;">${p.plannedDuration}분</span>
+          
+          ${p.isPlanConfirmed 
+            ? `<span class="badge badge-emerald">계획확정</span>` 
+            : `
+              ${state.currentUser.role !== 'student' 
+                ? `<button class="btn btn-emerald" style="padding:4px 8px; font-size:11px;" onclick="approvePlan('${p.id}')">승인</button>` 
+                : `<span class="badge badge-gray">승인대기</span>`
+              }
+            `
+          }
         </div>
-      `;
+      `).join("");
     } else {
-      // 1-B. 학생 모드: 실적 등록
-      let perfRowsHtml = myPlans.map((plan, idx) => {
-        const seq = idx + 1;
-        const isConfirmed = plan.isConfirmed;
+      // 신규 입력 폼 (최대 20개 입력 가능 하도록 행 구조 생성)
+      // 미완료 항목 디폴트 띄워주기 기능 구현
+      const lastUncompleted = findLastUncompletedPlans(studentId);
+      
+      const rowsCount = Math.max(3, lastUncompleted.length);
+      planInputs = Array.from({ length: Math.min(20, rowsCount + 2) }).map((_, idx) => {
+        const defaultPlan = lastUncompleted[idx] || { activityName: "", start: "14:00", end: "15:00" };
+        
         return `
-          <div class="plan-row">
-            <div><strong>${seq}.</strong> ${plan.activityName}</div>
-            <div>계획: ${plan.plannedStartTime} ~ ${plan.plannedEndTime} (${plan.plannedDuration}분)</div>
-            <div>실제 수행 시간 기록: 
-              <input type="time" id="act-start-${plan.id}" value="${plan.actualStartTime || plan.plannedStartTime}" ${isConfirmed ? "disabled" : ""} style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;"> ~ 
-              <input type="time" id="act-end-${plan.id}" value="${plan.actualEndTime || plan.plannedEndTime}" ${isConfirmed ? "disabled" : ""} style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;">
-            </div>
-            <div>
-              <label style="display:inline; margin:0;"><input type="checkbox" id="act-comp-${plan.id}" ${plan.isCompleted ? "checked" : ""} ${isConfirmed ? "disabled" : ""}> 완료</label>
-            </div>
-            <div>
-              ${isConfirmed ? `<span class="status-pill success">확정완료</span>` : `<span class="status-pill warning">저장대기</span>`}
-            </div>
+          <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+            <span style="font-weight:700; width:30px;">#${idx + 1}</span>
+            <input type="text" id="actName_${idx}" value="${escapeHTML(defaultPlan.activityName)}" placeholder="활동/과제명 입력" style="flex:2; padding:8px;">
+            <input type="time" id="actStart_${idx}" value="${defaultPlan.start}" style="flex:1; padding:8px;">
+            <input type="time" id="actEnd_${idx}" value="${defaultPlan.end}" style="flex:1; padding:8px;">
           </div>
         `;
       }).join("");
-
-      if (myPlans.length === 0) {
-        perfRowsHtml = `<p style="text-align:center; padding:2rem; color:var(--text-muted);">수립된 당일 계획이 없습니다. 먼저 '당일 계획 수립' 탭에서 계획을 입력해 주세요.</p>`;
-      }
-
-      contentHtml = `
-        <div class="card">
-          <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>오늘 [${currentStudent ? currentStudent.name : ""}] 학생 당일 실적 등록 (${state.selectedDate})</span>
-            ${myPlans.length > 0 ? `<button class="btn btn-sm" onclick="saveAllPerformancePlans()"><i data-lucide="save"></i> 실적 일괄 저장</button>` : ""}
-          </div>
-          <div class="plan-list-editor">
-            ${perfRowsHtml}
-          </div>
-          ${myPlans.length > 0 ? `
-            <div style="margin-top: 1.5rem; text-align: right;">
-              <button class="btn" onclick="saveAllPerformancePlans()"><i data-lucide="save"></i> 당일 실적 일괄 저장/제출</button>
-            </div>
-          ` : ""}
-        </div>
-      `;
     }
 
-  } else if (canManage) {
-    // 2. 관리자(선생님) 모드: 학생 선택 및 계획 검토 / 실적 검토
-    if (!state.targetProgressStudentId && state.students.length > 0) {
-      state.targetProgressStudentId = state.students[0].id;
-    }
-    const targetStudentId = state.targetProgressStudentId || "";
-    const student = state.students.find(s => s.id === targetStudentId);
-    const plans = state.dailyPlans.filter(dp => dp.studentId === targetStudentId && dp.date === state.selectedDate);
-
-    let planListTableRows = "";
-
-    if (state.progressTab === "plan") {
-      // 2-A. 선생님 모드: 계획 검토 및 수정/확정
-      planListTableRows = plans.map((p, idx) => `
-        <tr class="plan-row-elem">
-          <td><strong>${idx+1}.</strong></td>
-          <td><input type="text" id="admin-act-name-${p.id}" value="${p.activityName}" style="padding:0.3rem;"></td>
-          <td><input type="time" step="600" id="admin-act-start-${p.id}" value="${p.plannedStartTime}" style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;"></td>
-          <td><input type="time" step="600" id="admin-act-end-${p.id}" value="${p.plannedEndTime}" style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;"></td>
-          <td style="font-weight:700;">${p.plannedDuration}분</td>
-          <td>
-            ${p.isPlanConfirmed 
-              ? `<span class="status-pill success">계획확정됨</span>` 
-              : `<button class="btn btn-sm" onclick="saveAdminProgressPlan('${p.id}')">계획확정</button>`}
-            <button class="btn btn-sm btn-danger" onclick="deleteProgressPlan('${p.id}')">삭제</button>
-          </td>
-        </tr>
-      `).join("");
-
-      if (plans.length === 0) {
-        planListTableRows = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">오늘 수립된 계획이 없습니다.</td></tr>`;
-      }
-
-      contentHtml = `
-        <div class="card">
-          <div class="card-title no-print">
-            <span>[당일 계획 검토] 학생 선택 및 수립 현황</span>
-            <select id="progressTargetStudent" onchange="changeProgressTargetStudent(this.value)" style="width:180px;">
-              ${state.students.map(s => `<option value="${s.id}" ${s.id === targetStudentId ? "selected" : ""}>${s.name} (${s.school})</option>`).join("")}
-            </select>
-          </div>
-          <div style="overflow-x:auto;">
-            <table>
-              <thead>
-                <tr>
-                  <th>번호</th>
-                  <th>활동 내용</th>
-                  <th>계획 시작</th>
-                  <th>계획 종료</th>
-                  <th>소요 시간</th>
-                  <th>작업</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${planListTableRows}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `;
-    } else {
-      // 2-B. 선생님 모드: 실적 검토 및 최종 완료 확정 / 인쇄
-      const printHeaderHtml = student ? `
-        <div class="print-only-header">
-          <h2>일일 진도 학습 계획표 (실적 레포트)</h2>
-          <div class="meta-info">
-            <span><strong>학생명:</strong> ${student.name} (${student.school} / ${student.grade})</span>
-            <span><strong>학원명:</strong> 유주코칭국어학원</span>
-            <span><strong>일자:</strong> ${state.selectedDate}</span>
-          </div>
-        </div>
-      ` : "";
-
-      planListTableRows = plans.map((p, idx) => `
-        <tr class="plan-row-elem">
-          <td><strong>${idx+1}.</strong> ${p.activityName}</td>
-          <td>${p.plannedStartTime} ~ ${p.plannedEndTime} (${p.plannedDuration}분)</td>
-          <td>
-            <input type="time" step="600" id="admin-act-astart-${p.id}" value="${p.actualStartTime || p.plannedStartTime}" style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;">
-          </td>
-          <td>
-            <input type="time" step="600" id="admin-act-aend-${p.id}" value="${p.actualEndTime || p.plannedEndTime}" style="width:115px; padding:0.4rem; font-size:0.95rem; text-align:center;">
-          </td>
-          <td>
-            <input type="checkbox" id="admin-act-comp-${p.id}" ${p.isCompleted ? "checked" : ""}>
-          </td>
-          <td>
-            ${p.isConfirmed 
-              ? `<span class="status-pill success">최종확정됨</span>` 
-              : `<button class="btn btn-sm" onclick="saveAdminPerformancePlan('${p.id}')">실적확정</button>`}
-          </td>
-        </tr>
+    target.innerHTML = `
+      <div class="card">
+        <div class="card-title">📖 ${escapeHTML(st.name)} 학생의 당일 계획 등록 대장 (${state.selectedDate})</div>
         
-        <!-- 인쇄용 정적 텍스트 -->
-        <tr class="print-text" style="border-bottom: 1px solid #000;">
-          <td style="padding:0.5rem;"><strong>${idx+1}.</strong> ${p.activityName}</td>
-          <td style="padding:0.5rem;">계획: ${p.plannedStartTime} ~ ${p.plannedEndTime}</td>
-          <td style="padding:0.5rem;">실제: ${p.actualStartTime ? `${p.actualStartTime} ~ ${p.actualEndTime}` : "수행 안함"}</td>
-          <td style="padding:0.5rem; text-align:center;">${p.isCompleted ? "★ 완료" : "미완료"}</td>
-        </tr>
-      `).join("");
-
-      if (plans.length === 0) {
-        planListTableRows = `
-          <tr class="no-print"><td colspan="6" style="text-align:center; color:var(--text-muted);">수립된 계획이 없어 실적을 입력할 수 없습니다. 먼저 계획을 세워주세요.</td></tr>
-          <tr class="print-text"><td colspan="4" style="text-align:center;">오늘 수행한 활동 계획이 없습니다.</td></tr>
-        `;
-      }
-
-      contentHtml = `
-        ${printHeaderHtml}
-        <div class="card">
-          <div class="card-title no-print">
-            <span>[당일 실적 확정] 학생 선택 및 인쇄</span>
-            <div style="display:flex; gap:0.5rem;">
-              <select id="progressTargetStudent" onchange="changeProgressTargetStudent(this.value)" style="width:180px;">
-                ${state.students.map(s => `<option value="${s.id}" ${s.id === targetStudentId ? "selected" : ""}>${s.name} (${s.school})</option>`).join("")}
-              </select>
-              ${student ? `<button class="btn btn-sm btn-secondary" onclick="window.print()"><i data-lucide="printer"></i> 진도표 인쇄</button>` : ""}
+        <div style="margin-bottom:20px;">
+          ${plansToday.length === 0 ? `
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
+              * 학생은 등원하자마자 계획을 작성해 제출하며, 강사나 원장의 [계획확정 승인]을 득한 후 실행합니다. (미완료 복구 지원)
+            </p>
+            <div id="planFormRows">
+              ${planInputs}
             </div>
+            <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:20px;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
+          ` : `
+            <div id="planFormRows">
+              ${planInputs}
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+    
+  } else {
+    // --- 2. 당일 실적 등록 탭 ---
+    let resultRows = plansToday.map((p, idx) => {
+      const showConfirmed = p.isConfirmed;
+      const actualIn = p.actualStartTime || p.plannedStartTime;
+      const actualOut = p.actualEndTime || p.plannedEndTime;
+      const calcDuration = calculateMinutes(actualIn, actualOut);
+      
+      return `
+        <div class="plan-card ${p.isConfirmed ? 'confirmed' : ''}" style="margin-bottom:16px; padding:16px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <span style="font-weight:800; font-size:15px;">#${idx + 1} - ${escapeHTML(p.activityName)}</span>
+            <span style="font-size:12px; color:var(--text-muted);">계획: ${p.plannedStartTime}~${p.plannedEndTime} (${p.plannedDuration}분)</span>
           </div>
-          <div style="overflow-x:auto;">
-            <table>
-              <thead>
-                <tr class="no-print">
-                  <th>활동명</th>
-                  <th>계획 시간</th>
-                  <th>실제 시작</th>
-                  <th>실제 종료</th>
-                  <th>완료</th>
-                  <th>작업</th>
-                </tr>
-                <tr class="print-text" style="border-bottom: 2px solid #000;">
-                  <th style="text-align:left; padding:0.5rem;">활동 내용</th>
-                  <th style="text-align:left; padding:0.5rem;">계획 시간</th>
-                  <th style="text-align:left; padding:0.5rem;">실제 시간</th>
-                  <th style="text-align:center; padding:0.5rem;">완료 여부</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${planListTableRows}
-              </tbody>
-            </table>
+          
+          <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+            <div class="form-group" style="margin-bottom:0; width:120px;">
+              <label style="font-size:11px;">실제 시작시간</label>
+              <input type="time" id="realStart_${p.id}" value="${actualIn}" ${p.isConfirmed ? 'disabled' : ''} style="padding:6px; width:100%;">
+            </div>
+            <div class="form-group" style="margin-bottom:0; width:120px;">
+              <label style="font-size:11px;">실제 완료시간</label>
+              <input type="time" id="realEnd_${p.id}" value="${actualOut}" ${p.isConfirmed ? 'disabled' : ''} style="padding:6px; width:100%;">
+            </div>
+            
+            <div style="margin-left:12px; display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="realComp_${p.id}" ${p.isCompleted ? 'checked' : ''} ${p.isConfirmed ? 'disabled' : ''} style="width:18px; height:18px; cursor:pointer;">
+              <label for="realComp_${p.id}" style="font-weight:700; font-size:12px; cursor:pointer;">활동 완료 여부</label>
+            </div>
+            
+            <div style="margin-left:auto; display:flex; gap:6px;">
+              ${!p.isConfirmed ? `
+                ${isStudent ? `<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', false)">일시 저장</button>` : ''}
+                ${state.currentUser.role !== 'student' ? `<button class="btn btn-emerald" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', true)">진도 확정</button>` : ''}
+              ` : `<span class="badge badge-emerald">원장/조교 검재 확정 완료</span>`}
+            </div>
           </div>
         </div>
       `;
-    }
-  }
-
-  container.innerHTML = `
-    <h1 class="no-print">당일 진도 계획/실적 관리</h1>
-    ${progressTabsHtml}
-    ${contentHtml}
-  `;
-  lucide.createIcons();
-}
-
-// 학생: 활동 입력 시 실시간 계획 소요 시간 계산
-window.updateNewDuration = function(seq) {
-  const start = document.getElementById(`new-act-start-${seq}`).value;
-  const end = document.getElementById(`new-act-end-${seq}`).value;
-  const durDiv = document.getElementById(`new-act-dur-${seq}`);
-  if (durDiv) {
-    durDiv.innerText = `${calculateDuration(start, end)}분`;
-  }
-};
-
-// 학생: 당일 계획 일괄 등록/저장 (한 번에 계획 등록)
-window.saveAllNewProgressPlans = function() {
-  let addedCount = 0;
-  
-  for (let seq = 1; seq <= 20; seq++) {
-    const nameEl = document.getElementById(`new-act-name-${seq}`);
-    if (!nameEl) continue; // 이미 등록된 행은 입력 인풋이 없음
+    }).join("");
     
-    const name = nameEl.value.trim();
-    const start = document.getElementById(`new-act-start-${seq}`).value;
-    const end = document.getElementById(`new-act-end-${seq}`).value;
-    
-    if (name) {
-      if (!start || !end) {
-        alert(`${seq}번 활동의 시작 시간과 종료 시간을 모두 입력해 주세요.`);
-        return;
-      }
-      
-      const duration = calculateDuration(start, end);
-      if (duration <= 0) {
-        alert(`${seq}번 활동의 종료 시간은 시작 시간 이후여야 합니다.`);
-        return;
-      }
-      
-      const newPlan = {
-        id: "dp-" + Date.now() + "-" + seq,
-        studentId: state.selectedStudentId,
-        date: state.selectedDate,
-        activityName: name,
-        plannedStartTime: start,
-        plannedEndTime: end,
-        plannedDuration: duration,
-        actualStartTime: "",
-        actualEndTime: "",
-        isCompleted: false,
-        isConfirmed: false
-      };
-      
-      state.dailyPlans.push(newPlan);
-      addedCount++;
+    if (resultRows === "") {
+      resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">계획 탭에서 오늘의 계획을 먼저 등록해야 실적 작성이 가능합니다.</p>`;
     }
-  }
-  
-  if (addedCount === 0) {
-    alert("등록할 당일 계획을 한 개 이상 입력해 주세요.");
-    return;
-  }
-  
-  saveStateToStorage();
-  alert(`${addedCount}건의 당일 계획이 성공적으로 일괄 등록되었습니다.`);
-  navigate("progress");
-};
 
-// 진도관리 서브 탭 변경 핸들러
-window.switchProgressTab = function(tabName) {
-  state.progressTab = tabName;
-  navigate("progress");
-};
-
-// 학생: 실적 등록 탭에서 실적 일괄 저장/제출
-window.saveAllPerformancePlans = function() {
-  const myPlans = state.dailyPlans.filter(dp => dp.studentId === state.selectedStudentId && dp.date === state.selectedDate);
-  let savedCount = 0;
-
-  myPlans.forEach(plan => {
-    const startEl = document.getElementById(`act-start-${plan.id}`);
-    const endEl = document.getElementById(`act-end-${plan.id}`);
-    const compEl = document.getElementById(`act-comp-${plan.id}`);
-
-    if (startEl && endEl && compEl) {
-      plan.actualStartTime = startEl.value;
-      plan.actualEndTime = endEl.value;
-      plan.isCompleted = compEl.checked;
-      savedCount++;
-    }
-  });
-
-  if (savedCount === 0) {
-    alert("저장할 계획이 없습니다. 먼저 '당일 계획 수립' 탭에서 계획을 등록해 주세요.");
-    return;
-  }
-
-  saveStateToStorage();
-  alert(`${savedCount}건의 당일 실적이 일괄 저장/제출되었습니다. 선생님의 최종 승인을 대기합니다.`);
-  navigate("progress");
-};
-
-// 선생님: 계획 수립 검토에서 계획 수정 및 단건 확정
-window.saveAdminProgressPlan = function(planId) {
-  const name = document.getElementById(`admin-act-name-${planId}`).value.trim();
-  const start = document.getElementById(`admin-act-start-${planId}`).value;
-  const end = document.getElementById(`admin-act-end-${planId}`).value;
-
-  if (!name || !start || !end) {
-    alert("활동명과 계획 시간을 입력해 주세요.");
-    return;
-  }
-
-  const idx = state.dailyPlans.findIndex(dp => dp.id === planId);
-  if (idx >= 0) {
-    state.dailyPlans[idx].activityName = name;
-    state.dailyPlans[idx].plannedStartTime = start;
-    state.dailyPlans[idx].plannedEndTime = end;
-    state.dailyPlans[idx].plannedDuration = calculateDuration(start, end);
-    state.dailyPlans[idx].isPlanConfirmed = true; // 계획 확정 처리 (실적 입력을 막지 않음)
-
-    saveStateToStorage();
-    alert("학습 계획이 검토/확정되었습니다.");
-    navigate("progress");
-  }
-};
-
-// 선생님: 실적 등록 검토에서 실제 실적 수정 및 단건 승인
-window.saveAdminPerformancePlan = function(planId) {
-  const astart = document.getElementById(`admin-act-astart-${planId}`).value;
-  const aend = document.getElementById(`admin-act-aend-${planId}`).value;
-  const isComp = document.getElementById(`admin-act-comp-${planId}`).checked;
-
-  const idx = state.dailyPlans.findIndex(dp => dp.id === planId);
-  if (idx >= 0) {
-    state.dailyPlans[idx].actualStartTime = astart;
-    state.dailyPlans[idx].actualEndTime = aend;
-    state.dailyPlans[idx].isCompleted = isComp;
-    state.dailyPlans[idx].isConfirmed = true; // 최종 확정
-
-    saveStateToStorage();
-    alert("실제 학습 실적이 승인(확정)되었습니다.");
-    navigate("progress");
-  }
-};
-
-// 선생님: 진도 관리 대상 학생 변경
-window.changeProgressTargetStudent = function(studentId) {
-  state.targetProgressStudentId = studentId;
-  saveStateToStorage();
-  navigate("progress");
-};
-
-// 학생: 실제 시간 입력 시 실시간 반영
-window.saveActualTimes = function(planId) {
-  const start = document.getElementById(`act-start-${planId}`).value;
-  const end = document.getElementById(`act-end-${planId}`).value;
-  
-  const idx = state.dailyPlans.findIndex(dp => dp.id === planId);
-  if (idx >= 0) {
-    state.dailyPlans[idx].actualStartTime = start;
-    state.dailyPlans[idx].actualEndTime = end;
-    saveStateToStorage();
-    
-    // 화면상의 실제소요 td 업데이트
-    const durDiv = document.getElementById(`act-dur-${planId}`);
-    if (durDiv) {
-      durDiv.innerText = `${calculateDuration(start, end)}분`;
-    }
-  }
-};
-
-// 학생: 완료 체크박스 토글 시 반영
-window.saveActualCompleted = function(planId, isChecked) {
-  const idx = state.dailyPlans.findIndex(dp => dp.id === planId);
-  if (idx >= 0) {
-    state.dailyPlans[idx].isCompleted = isChecked;
-    saveStateToStorage();
-  }
-};
-
-// 원장/강사/조교: 진도 수정 및 확정 저장
-window.saveAdminProgressRow = function(planId) {
-  const name = document.getElementById(`admin-act-name-${planId}`).value.trim();
-  const start = document.getElementById(`admin-act-start-${planId}`).value;
-  const end = document.getElementById(`admin-act-end-${planId}`).value;
-  const astart = document.getElementById(`admin-act-astart-${planId}`).value;
-  const aend = document.getElementById(`admin-act-aend-${planId}`).value;
-  const isComp = document.getElementById(`admin-act-comp-${planId}`).checked;
-
-  if (!name || !start || !end) {
-    alert("활동명과 계획 시간을 정확히 입력해 주세요.");
-    return;
-  }
-
-  const idx = state.dailyPlans.findIndex(dp => dp.id === planId);
-  if (idx >= 0) {
-    state.dailyPlans[idx].activityName = name;
-    state.dailyPlans[idx].plannedStartTime = start;
-    state.dailyPlans[idx].plannedEndTime = end;
-    state.dailyPlans[idx].plannedDuration = calculateDuration(start, end);
-    state.dailyPlans[idx].actualStartTime = astart;
-    state.dailyPlans[idx].actualEndTime = aend;
-    state.dailyPlans[idx].isCompleted = isComp;
-    state.dailyPlans[idx].isConfirmed = true; // 확정!
-
-    saveStateToStorage();
-    alert("계획이 수정 및 확정되었습니다.");
-    navigate("progress");
-  }
-};
-
-// 진도 계획 행 삭제
-window.deleteProgressPlan = function(planId) {
-  if (confirm("해당 계획을 삭제하시겠습니까?")) {
-    state.dailyPlans = state.dailyPlans.filter(dp => dp.id !== planId);
-    saveStateToStorage();
-    navigate("progress");
-  }
-};
-
-
-// ==========================================
-// 6. 모달 팝업 컨트롤러
-// ==========================================
-window.closeModal = function() {
-  document.getElementById("modalOverlay").style.display = "none";
-};
-
-// ==========================================
-// 7. 학원 공식 캘린더 / 휴일 / 가동 요일 설정 헬퍼
-// ==========================================
-
-// 원장: 학원 휴일 토글
-window.toggleAcademyHoliday = function(dateStr) {
-  if (!state.operatingConfigs.holidays) {
-    state.operatingConfigs.holidays = [];
-  }
-
-  const idx = state.operatingConfigs.holidays.indexOf(dateStr);
-  if (idx >= 0) {
-    state.operatingConfigs.holidays.splice(idx, 1);
-    alert(`${dateStr}일의 학원 휴일 설정을 해제하였습니다.`);
-  } else {
-    state.operatingConfigs.holidays.push(dateStr);
-    alert(`${dateStr}일을 학원 휴일로 지정하였습니다. 해당 일자에는 수강 신청 및 등원이 전면 차단됩니다.`);
-  }
-
-  saveStateToStorage();
-  navigate("timetable");
-};
-
-// 원장: 요일별 가동 시간 설정 저장
-window.saveAcademyDayConfigs = function() {
-  const days = ["월", "화", "수", "목", "금", "토", "일"];
-  const dayConfigs = {};
-
-  days.forEach(day => {
-    const active = document.getElementById(`day-active-${day}`).checked;
-    const start = document.getElementById(`day-start-${day}`).value;
-    const end = document.getElementById(`day-end-${day}`).value;
-
-    dayConfigs[day] = { active, start, end };
-  });
-
-  state.operatingConfigs.dayConfigs = dayConfigs;
-  
-  // 전체 학원 운영 요일 리스트 갱신 (호환성 보장)
-  state.operatingConfigs.operatingDays = days.filter(d => dayConfigs[d].active);
-  
-  saveStateToStorage();
-  alert("요일별 가동 시간 설정이 완료되었습니다.");
-  navigate("timetable");
-};
-
-// 학원 전체 월간 캘린더 뷰 생성기
-// 학원 전체 월간 캘린더 뷰 생성기 (단일 Grid 컨테이너 구조)
-window.generateAcademyCalendarView = function() {
-  const year = 2026;
-  const month = 6; // 0-based: 7월
-  const firstDay = new Date(year, month, 1).getDay();
-  const lastDate = new Date(year, month + 1, 0).getDate();
-
-  let html = `
-    <div class="calendar-container" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--border-color); border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); margin-bottom: 0;">
-      <div class="calendar-header" style="color:var(--danger-color); font-weight:700; text-align:center; padding:0.75rem 0.5rem; background:var(--bg-tertiary);">일</div>
-      <div class="calendar-header" style="text-align:center; padding:0.75rem 0.5rem; background:var(--bg-tertiary);">월</div>
-      <div class="calendar-header" style="text-align:center; padding:0.75rem 0.5rem; background:var(--bg-tertiary);">화</div>
-      <div class="calendar-header" style="text-align:center; padding:0.75rem 0.5rem; background:var(--bg-tertiary);">수</div>
-      <div class="calendar-header" style="text-align:center; padding:0.75rem 0.5rem; background:var(--bg-tertiary);">목</div>
-      <div class="calendar-header" style="text-align:center; padding:0.75rem 0.5rem; background:var(--bg-tertiary);">금</div>
-      <div class="calendar-header" style="color:var(--primary-color); font-weight:700; text-align:center; padding:0.75rem 0.5rem; background:var(--bg-tertiary);">토</div>
-  `;
-
-  // 빈 칸 채우기
-  for (let i = 0; i < firstDay; i++) {
-    html += `<div class="calendar-day other-month"><span class="calendar-date-number"></span></div>`;
-  }
-
-  // 일자 채우기
-  for (let day = 1; day <= lastDate; day++) {
-    const dayStr = String(day).padStart(2, "0");
-    const dateStr = `2026-07-${dayStr}`;
-
-    const isHoliday = state.operatingConfigs.holidays && state.operatingConfigs.holidays.includes(dateStr);
-    const currentWeekDay = new Date(year, month, day).getDay();
-    const dayLabel = ["일", "월", "화", "수", "목", "금", "토"][currentWeekDay];
-
-    const isToday = dateStr === state.selectedDate ? "border: 2.5px solid var(--accent);" : "";
-
-    html += `
-      <div class="calendar-day ${isHoliday ? 'is-holiday-cell' : ''}" onclick="toggleAcademyHoliday('${dateStr}')" style="cursor:pointer; min-height:110px; padding:0.5rem; position:relative; ${isToday} ${isHoliday ? 'background:rgba(239, 68, 68, 0.05);' : ''}">
-        <span class="calendar-date-number" style="font-weight:700; color:${dayLabel==='일'?'var(--danger-color)':dayLabel==='토'?'var(--primary-color)':'var(--text-primary)'};">${day}</span>
-        ${isHoliday 
-          ? `<div style="color:var(--danger-color); font-size:0.75rem; font-weight:700; padding:0.15rem 0.25rem; border-radius:4px; text-align:center; background:rgba(239,68,68,0.15); margin-top:0.4rem; white-space:nowrap;">학원 휴무 ❌</div>` 
-          : `<div style="color:var(--text-muted); font-size:0.7rem; margin-top:0.4rem; text-align:center;">정상 운영</div>`}
+    target.innerHTML = `
+      <div class="card">
+        <div class="card-title">🏆 ${escapeHTML(st.name)} 학생 당일 진도 및 완료 실적 기입 대장</div>
+        ${resultRows}
       </div>
     `;
   }
+}
 
-  // 다음 달 빈 칸 채우기
-  const totalSlots = firstDay + lastDate;
-  const remaining = 35 - totalSlots;
-  const finalRemaining = remaining >= 0 ? remaining : 42 - totalSlots;
-  for (let i = 0; i < finalRemaining; i++) {
-    html += `<div class="calendar-day other-month"><span class="calendar-date-number"></span></div>`;
-  }
-
-  html += `</div>`;
+// 이전 등원 일자 중 '미완료' 상태로 남겨진 진도 계획 선별 기능
+function findLastUncompletedPlans(studentId) {
+  const sortedPlans = [...state.dailyPlans]
+    .filter(p => p.studentId === studentId && !p.isCompleted)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+  // 고유 활동명 기준 중복 제거하여 미완료 리스트 반환
+  const uniqueNames = new Set();
+  const result = [];
   
-  return `
-    <div class="card" style="padding:0; overflow:hidden;">
-      <div class="calendar-header-banner" style="display:flex; justify-content:space-between; align-items:center; padding:1.2rem; background:rgba(16, 185, 129, 0.05); border-bottom:1px solid var(--border-color);">
-        <h3 style="margin:0; font-size:1.15rem; font-weight:800; color:var(--primary-color);">🗓 2026년 7월 학원 휴일 및 일정 관리</h3>
-        <span style="font-size:0.8rem; color:var(--text-secondary);">* 달력 날짜를 클릭하면 <strong>학원 휴일 지정/해제</strong>가 실시간 토글됩니다.</span>
-      </div>
-      <div style="padding:1.2rem;">
-        ${html}
-      </div>
-    </div>
-  `;
-};
+  sortedPlans.forEach(p => {
+    if (!uniqueNames.has(p.activityName)) {
+      uniqueNames.add(p.activityName);
+      result.push({
+        activityName: p.activityName,
+        start: p.plannedStartTime,
+        end: p.plannedEndTime
+      });
+    }
+  });
+  
+  return result;
+}
+
+// 학생 계획 제출
+async function submitDailyPlans(studentId) {
+  const plans = [];
+  
+  for (let idx = 0; idx < 20; idx++) {
+    const elName = document.getElementById(`actName_${idx}`);
+    if (!elName) continue;
+    
+    const name = elName.value.trim();
+    if (name === "") continue;
+    
+    const start = document.getElementById(`actStart_${idx}`).value;
+    const end = document.getElementById(`actEnd_${idx}`).value;
+    
+    const id = `pl-${studentId}-${state.selectedDate}-${idx}`;
+    const planRecord = {
+      id,
+      studentId,
+      date: state.selectedDate,
+      activityName: name,
+      plannedStartTime: start,
+      plannedEndTime: end,
+      plannedDuration: calculateMinutes(start, end),
+      actualStartTime: "",
+      actualEndTime: "",
+      isCompleted: false,
+      isConfirmed: false,
+      isPlanConfirmed: false
+    };
+    
+    plans.push({ id, data: planRecord });
+  }
+  
+  if (plans.length === 0) {
+    alert("활동명을 1개 이상 입력해 주세요.");
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient.from("agy_daily_plans").insert(plans);
+    if (!error) {
+      alert("오늘의 학습 계획이 제출되었습니다. 담당 선생님 승인 후 완료 진행하세요.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("제출 실패");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// 원장/조교 계획 승인
+async function approvePlan(planId) {
+  const plan = state.dailyPlans.find(p => p.id === planId);
+  if (!plan) return;
+  
+  plan.isPlanConfirmed = true;
+  try {
+    const { error } = await supabaseClient
+      .from("agy_daily_plans")
+      .update({ data: plan })
+      .eq("id", planId);
+      
+    if (!error) {
+      await loadAllData();
+      renderProgress();
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// 학생 실적 임시 저장 및 교사 확정
+async function saveStudentResult(planId, makeConfirmed) {
+  const start = document.getElementById(`realStart_${planId}`).value;
+  const end = document.getElementById(`realEnd_${planId}`).value;
+  const isCompleted = document.getElementById(`realComp_${planId}`).checked;
+  
+  const plan = state.dailyPlans.find(p => p.id === planId);
+  if (!plan) return;
+  
+  plan.actualStartTime = start;
+  plan.actualEndTime = end;
+  plan.isCompleted = isCompleted;
+  plan.isConfirmed = makeConfirmed;
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_daily_plans")
+      .update({ data: plan })
+      .eq("id", planId);
+      
+    if (!error) {
+      alert(makeConfirmed ? "진도가 완료 확정되었습니다." : "실적이 임시 저장되었습니다.");
+      await loadAllData();
+      renderProgress();
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+
+// --- 10. 글로벌 모달 팝업 컨트롤러 ---
+function openModal(htmlContent) {
+  const overlay = document.getElementById("globalModal");
+  const content = document.getElementById("modalContent");
+  content.innerHTML = htmlContent;
+  overlay.style.display = "flex";
+  
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function closeModal() {
+  document.getElementById("globalModal").style.display = "none";
+}
+
+// HTML 이스케이프 헬퍼
+function escapeHTML(str) {
+  if (!str) return "";
+  return str.replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+}
