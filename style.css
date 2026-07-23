@@ -2,27 +2,35 @@
 
 /* 1. 디자인 시스템 토큰 정의 */
 :root {
-  --primary-color: #059669;      /* 에메랄드 그린 - 신뢰감 있는 대표 칼라 */
-  --primary-hover: #047857;
-  --primary-light: #ecfdf5;
-  --text-dark: #0f172a;          /* 슬레이트 네이비 - 차분하고 가독성 높은 본문 */
-  --text-muted: #64748b;
-  --text-light: #94a3b8;
-  --bg-app: #f8fafc;             /* 부드러운 앱 배경 */
+  --primary-color: #135c39;      /* 포레스트 그린 - 깊이 있고 신뢰감 있는 대표 상아탑 칼라 */
+  --primary-hover: #0d462a;
+  --primary-light: #f2f8f4;
+  --accent-gold: #c59b27;        /* 상아탑 골드 포인트 */
+  --accent-gold-hover: #b0881e;
+  --accent-gold-light: #fbf7e8;
+  --text-dark: #2d2926;          /* 따뜻한 슬레이트 블랙 */
+  --text-muted: #706c61;         /* 차분한 브라운그레이 */
+  --text-light: #a39f93;
+  --bg-app: #f9f6f0;             /* 부드러운 템플릿 상아빛/모래색 배경 */
   --bg-card: #ffffff;
-  --border-color: #e2e8f0;
-  --border-hover: #cbd5e1;
-  --accent-red: #ef4444;         /* 휴일 및 퇴원 표시용 */
+  --border-color: #e6dfd3;       /* 테두리도 웜그레이 계열 */
+  --border-hover: #d2c8b6;
+  --accent-red: #b91c1c;         /* 고급스러운 딥레드 */
   --accent-red-light: #fef2f2;
-  --accent-yellow: #f59e0b;      /* 경고 및 보류 */
-  --accent-blue: #3b82f6;        /* 조교/강사 구분용 */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --accent-yellow: #d97706;      /* 고급스러운 앰버 */
+  --accent-blue: #1d4ed8;
+  --shadow-sm: 0 1px 3px 0 rgba(45, 41, 38, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(45, 41, 38, 0.08), 0 2px 4px -2px rgba(45, 41, 38, 0.08);
+  --shadow-lg: 0 10px 15px -3px rgba(45, 41, 38, 0.1), 0 4px 6px -4px rgba(45, 41, 38, 0.1);
   --radius-sm: 6px;
   --radius-md: 12px;
   --radius-lg: 18px;
   --font-main: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-title: 'Playfair Display', 'Cinzel', 'Noto Sans KR', serif;
+}
+
+h1, h2, h3, .logo, .sidebar-header h2, .page-title h1, .card-title, .homepage-nav .logo-area span {
+  font-family: var(--font-title) !important;
 }
 
 /* 2. 전역 초기화 */
@@ -496,27 +504,27 @@ table.yuju-table tr:hover td {
 .calendar-day-label {
   text-align: center;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-muted);
-  padding: 8px 0;
+  padding: 6px 0;
 }
 
 .calendar-cell {
-  aspect-ratio: 1.1;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 6px;
+  padding: 4px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   cursor: pointer;
   background: white;
   transition: all 0.2s;
-  min-height: 80px;
+  min-height: 60px;
+  height: auto;
 }
 
 .calendar-cell:hover {
-  border-color: var(--primary-color);
+  border-color: var(--accent-gold);
   box-shadow: var(--shadow-sm);
 }
 
@@ -528,7 +536,7 @@ table.yuju-table tr:hover td {
 
 .calendar-cell .day-num {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 17px;
 }
 
 .calendar-cell.holiday {
@@ -539,9 +547,9 @@ table.yuju-table tr:hover td {
 }
 
 .calendar-cell .cell-status {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 4px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 1px 3px;
   border-radius: 4px;
   text-align: center;
 }
@@ -1330,6 +1338,89 @@ table.yuju-table tr:hover td {
   }
   .homepage-card.compact-bottom {
     padding: 24px;
+  }
+}
+
+/* 요일별 강사 계획 그리드 */
+.days-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+/* 밍크고래 계획 수립 안내 화면 */
+.whale-guide-overlay {
+  width: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(135deg, rgba(29, 78, 216, 0.1) 0%, rgba(19, 92, 57, 0.2) 100%), url('minke_whale.jpg') no-repeat center center;
+  background-size: cover;
+  padding: 60px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
+  min-height: 480px;
+}
+
+.whale-guide-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(197, 155, 39, 0.3);
+  border-radius: var(--radius-lg);
+  padding: 40px;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.whale-guide-card h2 {
+  font-family: var(--font-title);
+  color: var(--primary-color);
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.whale-quote-box {
+  background: var(--primary-light);
+  border-left: 4px solid var(--accent-gold);
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--text-dark);
+  text-align: center;
+  width: 100%;
+  line-height: 1.6;
+  font-weight: 500;
+}
+
+.whale-guide-card p {
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+/* 대시보드 2단 레이아웃 */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 24px;
+  margin-top: 24px;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -23,71 +23,24 @@ let state = {
   selectedDate: new Date().toISOString().split("T")[0]
 };
 
-// 오프라인 로컬 모크 데이터 로딩 헬퍼
-function loadOfflineMockData() {
-  if (window.mockData) {
-    state.students = (window.mockData.students || []).map(r => r.data || r);
-    state.teachers = (window.mockData.teachers || []).map(r => r.data || r);
-    state.teacherSchedules = (window.mockData.teacherSchedules || []).map(r => r.data || r);
-    state.teacherWorkLogs = (window.mockData.teacherWorkLogs || []).map(r => r.data || r);
-    state.enrollments = (window.mockData.enrollments || []).map(r => r.data || r);
-    state.attendance = (window.mockData.attendance || []).map(r => r.data || r);
-    state.dailyPlans = (window.mockData.dailyPlans || []).map(r => r.data || r);
-    state.notices = (window.mockData.notices || []).map(r => r.data || r);
-    state.monthlyOperations = {};
-    if (window.mockData.monthlyOperations) {
-      window.mockData.monthlyOperations.forEach(r => {
-        state.monthlyOperations[r.year_month] = r.configs;
-      });
-    }
-    console.log("오프라인 로컬 모크 데이터가 메모리에 로드되었습니다.");
-  }
-}
-
 // 3. 앱 구동 및 데이터 로딩 시작
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initializeApp);
-} else {
-  initializeApp();
-}
-
-async function initializeApp() {
+document.addEventListener("DOMContentLoaded", async () => {
   // 아이콘 초기 렌더링
   if (window.lucide) window.lucide.createIcons();
   
-  // Supabase 연결 불가 시 콘솔 안내 및 경고 (얼럿 제거하여 구동을 막지 않음)
+  // Supabase 연결 불가 시 안내
   if (!supabaseClient) {
-    console.warn("Supabase 클라이언트를 초기화할 수 없습니다. 오프라인 모드 또는 CDN 로드 실패 상태입니다.");
-    loadOfflineMockData();
+    alert("Supabase 클라이언트를 초기화할 수 없습니다. 인터넷 연결을 확인해 주세요.");
+    return;
   }
 
-  // 1. 테이블 초기 데이터 Seeding (비어있을 경우) - 백그라운드 비동기 실행 (클라이언트가 존재할 때만)
-  if (supabaseClient) {
-    seedDatabaseIfEmpty();
-  }
+  // 1. 테이블 초기 데이터 Seeding (비어있을 경우)
+  await seedDatabaseIfEmpty();
 
   // 2. 브라우저 세션 로그인 상태 복원
-  let cachedUser = null;
-  try {
-    cachedUser = localStorage.getItem("yuju_logged_user");
-  } catch (e) {
-    console.warn("localStorage is not available:", e);
-  }
-  
-  let parseSuccess = false;
+  const cachedUser = localStorage.getItem("yuju_logged_user");
   if (cachedUser) {
-    try {
-      state.currentUser = JSON.parse(cachedUser);
-      if (state.currentUser && state.currentUser.username) {
-        parseSuccess = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse cached user:", e);
-      state.currentUser = null;
-    }
-  }
-  
-  if (parseSuccess) {
+    state.currentUser = JSON.parse(cachedUser);
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("appScreen").style.display = "flex";
     
@@ -96,16 +49,15 @@ async function initializeApp() {
     document.getElementById("profileRole").innerText = getRoleKorean(state.currentUser.role);
     
     // 데이터 불러오기 및 대시보드 진입
-    if (supabaseClient) {
-      await loadAllData();
-    }
+    await loadAllData();
     renderSidebarMenu();
     navigate("dashboard");
   } else {
-    // 퍼블릭 홈페이지 표출
-    openPublicHomepage();
+    // 로그인 화면 표출
+    document.getElementById("loginScreen").style.display = "flex";
+    document.getElementById("appScreen").style.display = "none";
   }
-}
+});
 
 // 한국어 역할 표시 변환 헬퍼
 function getRoleKorean(role) {
@@ -177,10 +129,6 @@ async function saveDefaultMonthlyOperation(yearMonth) {
 
 // 5. 전체 데이터 로드 함수 (새로고침, 로그인 후 구동)
 async function loadAllData() {
-  if (!supabaseClient) {
-    console.log("오프라인 모드: loadAllData를 생략하고 로컬 메모리를 사용합니다.");
-    return;
-  }
   try {
     const [
       resStudents,
@@ -230,30 +178,6 @@ async function handleLoginSubmit(event) {
   const usernameInput = document.getElementById("loginUsername").value.trim();
   const passwordInput = document.getElementById("loginPassword").value.trim();
   
-  if (!supabaseClient) {
-    // 오프라인 모드 Fallback 로그인 처리
-    const user = (window.mockData.users || []).find(u => u.username === usernameInput);
-    if (!user) {
-      alert("등록되지 않은 사용자 이름입니다. (오프라인 모드)");
-      return;
-    }
-    if (user.password !== passwordInput) {
-      alert("비밀번호가 올바르지 않습니다. (오프라인 모드)");
-      return;
-    }
-    state.currentUser = user;
-    
-    if (user.password === "1234" && !user.is_password_changed) {
-      document.getElementById("loginCard").style.display = "none";
-      document.getElementById("changePwCard").style.display = "block";
-      validateNewPassword("");
-      if (window.lucide) window.lucide.createIcons();
-    } else {
-      completeLoginSession();
-    }
-    return;
-  }
-  
   try {
     const { data: user, error } = await supabaseClient
       .from("agy_users")
@@ -290,11 +214,7 @@ async function handleLoginSubmit(event) {
 }
 
 function completeLoginSession() {
-  try {
-    localStorage.setItem("yuju_logged_user", JSON.stringify(state.currentUser));
-  } catch (e) {
-    console.warn("localStorage is not available:", e);
-  }
+  localStorage.setItem("yuju_logged_user", JSON.stringify(state.currentUser));
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("appScreen").style.display = "flex";
   
@@ -399,12 +319,7 @@ async function handleChangePwSubmit(event) {
 function handleLogout() {
   if (confirm("로그아웃 하시겠습니까?")) {
     state.currentUser = null;
-    state.hasEnteredPlanMode = false;
-    try {
-      localStorage.removeItem("yuju_logged_user");
-    } catch (e) {
-      console.warn("localStorage is not available:", e);
-    }
+    localStorage.removeItem("yuju_logged_user");
     document.getElementById("loginScreen").style.display = "flex";
     document.getElementById("appScreen").style.display = "none";
     document.getElementById("loginCard").style.display = "block";
@@ -1680,47 +1595,13 @@ function renderTeacherPlan() {
     rows = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">등록된 강사 계획이 없습니다.</td></tr>`;
   }
 
-  // 요일별 강사 계획 리스트 데이터 생성
-  const days = ["월", "화", "수", "목", "금", "토", "일"];
-  const weekdayHTML = days.map(day => {
-    const daySchedules = state.teacherSchedules.filter(sch => sch.dayOfWeek === day);
-    let schedsHTML = daySchedules.map(sch => {
-      const tc = state.teachers.find(t => t.id === sch.teacherId);
-      if (!tc) return "";
-      return `
-        <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:10px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <strong style="color:var(--text-dark); font-size:13px;">${escapeHTML(tc.name)}</strong>
-            <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px;">${sch.startTime} - ${sch.endTime}</span>
-          </div>
-          <button class="btn btn-danger" style="padding:2px 6px; font-size:10px; border-radius:var(--radius-sm);" onclick="deleteTeacherSchedule('${sch.id}')">삭제</button>
-        </div>
-      `;
-    }).join("");
-
-    if (schedsHTML === "") {
-      schedsHTML = `<p style="text-align:center; font-size:12px; color:var(--text-muted); padding:16px 0; margin:0;">근무 없음</p>`;
-    }
-
-    return `
-      <div class="card" style="padding:16px; display:flex; flex-direction:column; min-width:160px; box-shadow:var(--shadow-sm); border:1px solid var(--border-color); margin-bottom:0;">
-        <div style="border-bottom:2px solid var(--primary-color); padding-bottom:8px; margin-bottom:12px; font-weight:800; font-size:14px; text-align:center; color:var(--primary-color);">
-          ${day}요일
-        </div>
-        <div style="flex-grow:1;">
-          ${schedsHTML}
-        </div>
-      </div>
-    `;
-  }).join("");
-
   target.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <h3 style="font-weight:700; font-size:16px;">강사별 주간 고정 계획 리스트</h3>
       <button class="btn btn-emerald" onclick="openNewScheduleModal()"><i data-lucide="plus"></i> 주간 일정 수립</button>
     </div>
     
-    <div class="card" style="margin-bottom: 32px;">
+    <div class="card">
       <div class="table-responsive">
         <table class="yuju-table">
           <thead>
@@ -1736,16 +1617,6 @@ function renderTeacherPlan() {
           </tbody>
         </table>
       </div>
-    </div>
-
-    <!-- 요일별 강사 계획 리스트 섹션 -->
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; margin-top:32px; border-top:1px solid var(--border-color); padding-top:24px;">
-      <h3 style="font-weight:700; font-size:16px;">요일별 강사 계획 리스트</h3>
-      <button class="btn btn-emerald" onclick="openNewScheduleModal()"><i data-lucide="plus"></i> 주간 일정 수립</button>
-    </div>
-
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:16px; margin-bottom:24px;">
-      ${weekdayHTML}
     </div>
   `;
   if (window.lucide) window.lucide.createIcons();
@@ -2572,40 +2443,6 @@ function renderProgress() {
   } else if (state.students.length > 0) {
     progressStudentId = state.students[0].id;
   }
-
-  // 학생 당일 계획 수립 대기화면 조건 확인
-  const isStudent = state.currentUser.role === 'student';
-  const plansToday = state.dailyPlans.filter(p => p.studentId === progressStudentId && p.date === state.selectedDate);
-  
-  if (isStudent && plansToday.length === 0 && !state.hasEnteredPlanMode) {
-    const quotes = window.mockData.quotes || [
-      "배움의 깊이를 더하는 상아탑에서의 하루가 미래를 바꿉니다.",
-      "독서는 정신의 음악이다. - 소크라테스"
-    ];
-    const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
-    
-    container.innerHTML = `
-      <div class="card minke-whale-card" style="background: linear-gradient(rgba(19, 92, 57, 0.45), rgba(13, 70, 42, 0.65)), url('minke_whale.jpg') no-repeat center center; background-size: cover; color: white; padding: 48px; border-radius: var(--radius-lg); text-align: center; box-shadow: var(--shadow-lg); min-height: 500px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: none; margin: 20px;">
-        <h2 style="font-family: 'Noto Sans KR', sans-serif; font-size: 26px; font-weight: 800; color: #fff; margin-bottom: 12px; text-shadow: 0 2px 4px rgba(0,0,0,0.3); line-height: 1.4; word-break: keep-all;">
-          오늘 학원에 도착해서 무엇을 할것인지 스스로 계획을 수립해봅니다
-        </h2>
-        <p style="font-size: 16px; color: rgba(255, 255, 255, 0.9); margin-bottom: 32px; text-shadow: 0 1px 2px rgba(0,0,0,0.3); word-break: keep-all;">
-          차분히 생각하시고 준비가 되면 계획수립 버튼을 누르세요
-        </p>
-        
-        <div style="max-width: 580px; margin-bottom: 32px; line-height: 1.8; background: rgba(0, 0, 0, 0.3); padding: 22px; border-radius: var(--radius-md); border-top: 3px solid var(--accent-gold); backdrop-filter: blur(3px); box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
-          <p style="font-size: 13px; font-weight: 700; color: var(--accent-gold); margin: 0 0 10px 0; font-family: var(--font-title); letter-spacing: 0.5px;">📖 오늘의 동기부여 명언</p>
-          <p style="font-size: 15px; font-style: italic; color: #fff; margin: 0; word-break: keep-all; line-height: 1.6;">"${randomQuote}"</p>
-        </div>
-        
-        <button class="btn btn-emerald" onclick="enterStudentPlanMode()" style="background-color: var(--accent-gold); color: var(--text-dark); font-weight: 800; padding: 14px 36px; font-size: 16px; border-radius: 30px; box-shadow: 0 4px 15px rgba(197, 155, 39, 0.4); border: none; cursor: pointer;">
-          계획수립 <i data-lucide="edit-3" style="margin-left: 6px; width: 16px; height: 16px; vertical-align: middle;"></i>
-        </button>
-      </div>
-    `;
-    if (window.lucide) window.lucide.createIcons();
-    return;
-  }
   
   // 드롭다운 리스트
   const studentOptions = state.students.map(s => `
@@ -2671,18 +2508,12 @@ function renderProgressTabContent(studentId) {
   
   // 오늘 날짜 계획 리스트 필터링
   const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
+  
   const isStudent = state.currentUser.role === 'student';
   
   if (progressTab === "plan") {
     // --- 1. 당일 계획 수립 탭 ---
     
-// 학생 계획수립 모드 진입 처리
-function enterStudentPlanMode() {
-  state.hasEnteredPlanMode = true;
-  renderProgress();
-}
-window.enterStudentPlanMode = enterStudentPlanMode;
-
     let planInputs = "";
     // 이미 등록된 계획이 있는 경우 리스트 표출
     if (plansToday.length > 0) {
@@ -2706,12 +2537,12 @@ window.enterStudentPlanMode = enterStudentPlanMode;
         </div>
       `).join("");
     } else {
-      // 신규 입력 폼: 기본 10개 입력 줄 보이기 + 미완료 항목 prefill
+      // 신규 입력 폼 (최대 20개 입력 가능 하도록 행 구조 생성)
+      // 미완료 항목 디폴트 띄워주기 기능 구현
       const lastUncompleted = findLastUncompletedPlans(studentId);
-      const initialCount = Math.max(10, lastUncompleted.length);
-      state.currentPlanRowsCount = initialCount;
       
-      planInputs = Array.from({ length: initialCount }).map((_, idx) => {
+      const rowsCount = Math.max(3, lastUncompleted.length);
+      planInputs = Array.from({ length: Math.min(20, rowsCount + 2) }).map((_, idx) => {
         const defaultPlan = lastUncompleted[idx] || { activityName: "", start: "14:00", end: "15:00" };
         
         return `
@@ -2732,18 +2563,12 @@ window.enterStudentPlanMode = enterStudentPlanMode;
         <div style="margin-bottom:20px;">
           ${plansToday.length === 0 ? `
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
-              * 학생은 등원하자마자 계획을 작성해 제출하며, 강사나 원장의 [계획확정 승인]을 득한 후 실행합니다. (기본 10줄 제공, 미완료 자동 이월)
+              * 학생은 등원하자마자 계획을 작성해 제출하며, 강사나 원장의 [계획확정 승인]을 득한 후 실행합니다. (미완료 복구 지원)
             </p>
             <div id="planFormRows">
               ${planInputs}
             </div>
-            
-            <div style="display:flex; gap:12px; margin-top:20px;">
-              <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
-                <i data-lucide="plus-circle"></i> [+ 계획 추가]
-              </button>
-              <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
-            </div>
+            <button class="btn btn-emerald" style="width:100%; justify-content:center; margin-top:20px;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
           ` : `
             <div id="planFormRows">
               ${planInputs}
@@ -2752,7 +2577,6 @@ window.enterStudentPlanMode = enterStudentPlanMode;
         </div>
       </div>
     `;
-    if (window.lucide) window.lucide.createIcons();
     
   } else {
     // --- 2. 당일 실적 등록 탭 ---
@@ -2808,44 +2632,10 @@ window.enterStudentPlanMode = enterStudentPlanMode;
   }
 }
 
-// 밍크고래 계획 모드 시작 헬퍼
-function startDailyPlanMode(studentId) {
-  state.hasEnteredPlanMode = true;
-  renderProgressTabContent(studentId);
-}
-
-// 계획 수립 동적 1줄씩 추가 (최대 20개)
-function addPlanRow(studentId) {
-  const container = document.getElementById("planFormRows");
-  if (!container) return;
-  
-  const currentCount = container.children.length;
-  if (currentCount >= 20) {
-    alert("계획은 최대 20개까지만 등록할 수 있습니다.");
-    return;
-  }
-  
-  const newRow = document.createElement("div");
-  newRow.style.display = "flex";
-  newRow.style.gap = "8px";
-  newRow.style.marginBottom = "10px";
-  newRow.style.alignItems = "center";
-  
-  newRow.innerHTML = `
-    <span style="font-weight:700; width:30px;">#${currentCount + 1}</span>
-    <input type="text" id="actName_${currentCount}" placeholder="활동/과제명 입력" style="flex:2; padding:8px;">
-    <input type="time" id="actStart_${currentCount}" value="14:00" style="flex:1; padding:8px;">
-    <input type="time" id="actEnd_${currentCount}" value="15:00" style="flex:1; padding:8px;">
-  `;
-  
-  container.appendChild(newRow);
-  state.currentPlanRowsCount = currentCount + 1;
-}
-
 // 이전 등원 일자 중 '미완료' 상태로 남겨진 진도 계획 선별 기능
 function findLastUncompletedPlans(studentId) {
   const sortedPlans = [...state.dailyPlans]
-    .filter(p => p.studentId === studentId && !p.isCompleted && p.date < state.selectedDate)
+    .filter(p => p.studentId === studentId && !p.isCompleted)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
     
   // 고유 활동명 기준 중복 제거하여 미완료 리스트 반환
@@ -2866,38 +2656,6 @@ function findLastUncompletedPlans(studentId) {
   return result;
 }
 
-// 계획 수립 시간 중첩(오버랩) 검증 헬퍼
-function checkTimeOverlaps(plans) {
-  for (let i = 0; i < plans.length; i++) {
-    const p1 = plans[i].data;
-    const s1 = p1.plannedStartTime;
-    const e1 = p1.plannedEndTime;
-    
-    // 1. 현재 입력된 계획들끼리 중첩 검사
-    for (let j = i + 1; j < plans.length; j++) {
-      const p2 = plans[j].data;
-      const s2 = p2.plannedStartTime;
-      const e2 = p2.plannedEndTime;
-      
-      if (s1 < e2 && s2 < e1) {
-        return `입력하신 계획 중 [#${i+1} ${p1.activityName}](${s1}~${e1})와 [#${j+1} ${p2.activityName}](${s2}~${e2})의 계획 시간이 중첩됩니다. 다른 시간대로 설정해 주세요.`;
-      }
-    }
-    
-    // 2. 이미 등록된 오늘 계획과 중첩 검사
-    const existing = state.dailyPlans.filter(p => p.studentId === p1.studentId && p.date === p1.date);
-    for (const p2 of existing) {
-      const s2 = p2.plannedStartTime;
-      const e2 = p2.plannedEndTime;
-      
-      if (s1 < e2 && s2 < e1) {
-        return `이미 오늘 등록 완료된 계획 [${p2.activityName}](${s2}~${e2})와 입력하신 [${p1.activityName}](${s1}~${e1})의 계획 시간이 중첩됩니다. 다른 시간대로 설정해 주세요.`;
-      }
-    }
-  }
-  return null;
-}
-
 // 학생 계획 제출
 async function submitDailyPlans(studentId) {
   const plans = [];
@@ -2911,11 +2669,6 @@ async function submitDailyPlans(studentId) {
     
     const start = document.getElementById(`actStart_${idx}`).value;
     const end = document.getElementById(`actEnd_${idx}`).value;
-    
-    if (!start || !end) {
-      alert("계획의 시작 시간과 종료 시간을 모두 입력해 주세요.");
-      return;
-    }
     
     const id = `pl-${studentId}-${state.selectedDate}-${idx}`;
     const planRecord = {
@@ -2941,29 +2694,6 @@ async function submitDailyPlans(studentId) {
     return;
   }
   
-  // 시간 중첩 검사 수행
-  const overlapError = checkTimeOverlaps(plans);
-  if (overlapError) {
-    alert(overlapError);
-    return;
-  }
-  
-  if (!supabaseClient) {
-    // 오프라인 모드 Fallback 저장
-    plans.forEach(p => {
-      // 중복 방지
-      const existIdx = state.dailyPlans.findIndex(o => o.id === p.id);
-      if (existIdx !== -1) {
-        state.dailyPlans[existIdx] = p.data;
-      } else {
-        state.dailyPlans.push(p.data);
-      }
-    });
-    alert("오늘의 학습 계획이 제출되었습니다. (오프라인 모드)");
-    renderProgress();
-    return;
-  }
-  
   try {
     const { error } = await supabaseClient.from("agy_daily_plans").insert(plans);
     if (!error) {
@@ -2984,13 +2714,6 @@ async function approvePlan(planId) {
   if (!plan) return;
   
   plan.isPlanConfirmed = true;
-  
-  if (!supabaseClient) {
-    alert("계획이 승인되었습니다. (오프라인 모드)");
-    renderProgress();
-    return;
-  }
-  
   try {
     const { error } = await supabaseClient
       .from("agy_daily_plans")
@@ -3019,12 +2742,6 @@ async function saveStudentResult(planId, makeConfirmed) {
   plan.actualEndTime = end;
   plan.isCompleted = isCompleted;
   plan.isConfirmed = makeConfirmed;
-  
-  if (!supabaseClient) {
-    alert(makeConfirmed ? "진도가 완료 확정되었습니다. (오프라인 모드)" : "실적이 임시 저장되었습니다. (오프라인 모드)");
-    renderProgress();
-    return;
-  }
   
   try {
     const { error } = await supabaseClient
@@ -3066,197 +2783,3 @@ function escapeHTML(str) {
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
 }
-
-// --- 퍼블릭 홈페이지(학원 소개) 기능 ---
-function renderHomepage() {
-  const container = document.getElementById("mainContent");
-  container.innerHTML = getHomepageHTML(false);
-  if (window.lucide) window.lucide.createIcons();
-}
-
-function openPublicHomepage() {
-  document.getElementById("loginScreen").style.display = "none";
-  const screen = document.getElementById("publicHomepageScreen");
-  screen.style.display = "block";
-  screen.innerHTML = getHomepageHTML(true);
-  if (window.lucide) window.lucide.createIcons();
-}
-
-function closePublicHomepage() {
-  document.getElementById("publicHomepageScreen").style.display = "none";
-  document.getElementById("loginScreen").style.display = "flex";
-  // 로그인 카드와 폼 리셋
-  document.getElementById("loginCard").style.display = "block";
-  document.getElementById("changePwCard").style.display = "none";
-  document.getElementById("loginUsername").value = "";
-  document.getElementById("loginPassword").value = "";
-}
-
-function handleHomepageContact(event) {
-  event.preventDefault();
-  const name = document.getElementById("contactName").value;
-  const phone = document.getElementById("contactPhone").value;
-  const field = document.getElementById("contactField").value;
-  
-  alert(`${name} 학생의 [${field}] 간편 상담 신청이 접수되었습니다.\n학원에서 내용을 검토한 후 입력하신 연락처(${phone})로 신속하게 안내해 드리겠습니다. 감사합니다!`);
-  event.target.reset();
-}
-
-function openConsultationModal(field) {
-  openModal(`
-    <div class="modal-header">
-      <h3>${field === '국어/독서코칭' ? '대치리드인 국어 독서코칭' : '유주코칭 진로진학컨설팅'} 상담 신청</h3>
-      <button class="modal-close" onclick="closeModal()">&times;</button>
-    </div>
-    <div class="modal-body">
-      <form onsubmit="handleHomepageContactModal(event, '${field}')" style="display: flex; flex-direction: column; gap: 14px;">
-        <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
-          <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학생 이름</label>
-          <input type="text" id="modalContactName" placeholder="학생 이름을 입력하세요" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
-        </div>
-        <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
-          <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학부모 연락처</label>
-          <input type="tel" id="modalContactPhone" placeholder="연락처를 입력하세요 (예: 010-1234-5678)" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
-        </div>
-        <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
-          <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학교 및 학년</label>
-          <input type="text" id="modalContactGrade" placeholder="예: 대치초 4학년" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
-        </div>
-        <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
-          <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">문의 및 참고사항</label>
-          <textarea id="modalContactMemo" placeholder="원장님께 전달할 특별한 내용(예: 독서 수준, 학습 성향 등)을 적어주세요." style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 80px; resize: none;"></textarea>
-        </div>
-        <button type="submit" class="btn btn-emerald" style="width: 100%; padding: 12px; font-weight: 600; border:none; border-radius:var(--radius-sm); cursor:pointer; background-color: var(--primary-color); color:white; margin-top:10px;">상담 신청 완료하기</button>
-      </form>
-    </div>
-  `);
-}
-
-function handleHomepageContactModal(event, field) {
-  event.preventDefault();
-  const name = document.getElementById("modalContactName").value;
-  const phone = document.getElementById("modalContactPhone").value;
-  const grade = document.getElementById("modalContactGrade").value;
-  
-  alert(`${name} 학생(${grade})의 [${field}] 상담 신청이 성공적으로 접수되었습니다!\n원장님이 확인 후 기재해주신 연락처(${phone})로 직접 전화 드리겠습니다. 감사합니다.`);
-  closeModal();
-}
-
-function getHomepageHTML(isPublic) {
-  return `
-    ${isPublic ? `
-      <nav class="homepage-nav" style="display:flex; justify-content:space-between; align-items:center; padding: 20px 40px; background: white; border-bottom: 1px solid var(--border-color); position:sticky; top:0; z-index:1000;">
-        <div class="logo-area" style="display:flex; align-items:center; gap:8px; font-family: var(--font-title); font-weight:800; font-size:22px; color: var(--primary-color);">
-          <i data-lucide="graduation-cap" style="width:28px; height:28px;"></i>
-          <span style="font-weight:900;">EduCare 상아탑</span>
-        </div>
-        <div class="nav-links" style="display:flex; gap:30px; font-weight:700; font-size:15px;">
-          <a href="#about" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--text-muted)'">학원 소개</a>
-          <a href="#programs" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--text-muted)'">대표 프로그램</a>
-          <a href="#blog" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--text-muted)'">교육 블로그</a>
-          <a href="#contact" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--text-muted)'">상담 예약</a>
-        </div>
-        <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:700; background-color: var(--text-dark); color: white; border:none; padding:10px 20px; border-radius:30px; cursor:pointer;">
-          <i data-lucide="lock" style="width:16px; height:16px;"></i> 학원관리 시스템 로그인
-        </button>
-      </nav>
-    ` : ''}
-    
-    <div class="homepage-container one-screen" id="about" style="display:flex; flex-direction:column; gap:30px; padding: 40px;">
-      <!-- 상단: 영웅 섹션 (EduCare 문구 반영) -->
-      <section class="hero-section compact-top" style="background: linear-gradient(135deg, rgba(19, 92, 57, 0.9) 0%, rgba(13, 70, 42, 0.95) 100%), url('ivory_tower.jpg') no-repeat center center; background-size: cover; padding: 50px 40px; border-radius: var(--radius-lg); color: white; display: grid; grid-template-columns: 1.5fr 1fr; gap: 30px; align-items: center; box-shadow: var(--shadow-lg);">
-        <div>
-          <span style="display: inline-block; padding: 4px 12px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 13.5px; font-weight: 700; color: #fcd34d; margin-bottom: 16px; letter-spacing:0.5px;">
-            ✨ 대치동 20년 경력의 검증된 프리미엄 명품 코칭
-          </span>
-          <h1 style="color:white; margin:0 0 16px 0; font-family: var(--font-title); font-size: 38px; font-weight:900; line-height:1.3; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-            배움의 깊이를 더하는 상아탑<br>독서력 진단부터 대입 입시 로드맵까지
-          </h1>
-          <p style="color:rgba(255,255,255,0.9); font-size:15.5px; margin-top:8px; line-height:1.7; font-weight:500;">
-            단순 주입식 교육을 넘어 학생의 문해력을 과학적으로 트레이닝하고,<br>수시 학생부 관리와 심층 상담을 통해 최적의 합격 전략을 설계합니다.
-          </p>
-          <div style="display:flex; gap:12px; margin-top:24px;">
-            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="background-color: var(--accent-gold); color: var(--text-dark); font-weight:800; border-radius:30px; padding:12px 24px; font-size:15px; box-shadow: 0 4px 12px rgba(197, 155, 39, 0.3);">
-              무료 상담 신청하기
-            </button>
-            <button class="btn btn-secondary" onclick="document.getElementById('programs').scrollIntoView({behavior: 'smooth'})" style="background: transparent; color: white; border: 1px solid white; border-radius:30px; padding:12px 24px; font-size:15px;">
-              프로그램 둘러보기
-            </button>
-          </div>
-        </div>
-        
-        <!-- 교육 철학 및 연락처 -->
-        <div style="background: rgba(255, 255, 255, 0.08); padding: 24px; border-radius: var(--radius-md); font-size: 13.5px; line-height: 1.8; border-left: 4px solid var(--accent-gold); backdrop-filter: blur(5px);">
-          <strong style="color:#fcd34d; font-size: 15px; display:block; margin-bottom:8px;">🏫 상아탑 EduCare 안내</strong>
-          📞 <strong>상담 대표 번호:</strong> <a href="tel:02-555-6910" style="color:white; font-weight:700; text-decoration:underline;">02-555-6910</a><br>
-          📍 <strong>국어학원:</strong> 도곡로93길 9, 3층 (도곡렉슬상가 인근)<br>
-          📍 <strong>상담교습소:</strong> 선릉로62길 32-1, 1층<br>
-          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.1); font-style:italic; font-size:12.5px; color:#e2e8f0;">
-            "글을 제대로 읽지 못하는 학생은 스스로 공부하는 힘을 기를 수 없습니다. 대치리드인에서 기본 문해력을 다지고 1:1 맞춤 대입 컨설팅으로 비전을 그립니다."
-          </div>
-        </div>
-      </section>
-
-      <!-- 하단: 좌우 2박스 배치 -->
-      <div class="cards-row" id="programs" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; scroll-margin-top: 100px;">
-        <!-- 좌측 박스: 대치리드인 국어학원 -->
-        <div class="homepage-card compact-bottom left-card" style="background:white; padding:32px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
-          <div>
-            <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:16px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="margin:0; font-family:var(--font-title); font-size:24px; color:var(--text-dark);">대치리드인 국어학원</h2>
-              <span class="badge badge-emerald">독해 및 국어 전문</span>
-            </div>
-            <ul class="program-list" style="list-style:none; padding:0; margin:0 0 24px 0; display:flex; flex-direction:column; gap:10px;">
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> <strong>특허받은 수준별 맞춤 독서 코칭</strong></li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> 초등 / 중등 독서독해 체계적 훈련</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> 고등 국어 내신 및 수능 완벽 대비</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> 글쓰기 트레이닝 (논술 및 수행평가)</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> 비문학 구조 독해 및 문학 작품 강독</li>
-            </ul>
-          </div>
-          <div>
-            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="width: 100%; padding: 14px; font-weight: 700; font-size:15px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
-              <i data-lucide="calendar"></i> 대치리드인 상담 신청하기
-            </button>
-            <div class="card-footer" style="padding:14px; font-size:13px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:20px; line-height:1.6;">
-              특징: 리드인 독서진단검사를 통해 학생의 읽기 능력을 정확하게 진단하고, 개인의 레벨에 맞는 도서 선정 및 전담 강사의 1:1 밀착 피드백을 제공합니다.
-            </div>
-          </div>
-        </div>
-
-        <!-- 우측 박스: 유주코칭 진학상담소 -->
-        <div class="homepage-card compact-bottom right-card" style="background:white; padding:32px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
-          <div>
-            <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:16px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="margin:0; font-family:var(--font-title); font-size:24px; color:var(--text-dark);">유주코칭 진학상담소</h2>
-              <span class="badge" style="background:var(--accent-gold-light); color:var(--accent-gold);">진로 및 진학 컨설팅</span>
-            </div>
-            <ul class="program-list" style="list-style:none; padding:0; margin:0 0 24px 0; display:flex; flex-direction:column; gap:10px;">
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> <strong>1:1 학습유형 분석 및 진로 설계</strong></li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> 개인 성향에 맞춘 자기주도학습 코칭</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> 중/고등부 생활기록부 및 수행평가 관리</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> 대입 전략 수시/정시 원서 접수 지도</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> 학습 의욕 고취 및 메타인지 강화</li>
-            </ul>
-          </div>
-          <div>
-            <button class="btn btn-emerald" onclick="openConsultationModal('진로진학컨설팅')" style="width: 100%; padding: 14px; font-weight: 700; font-size:15px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--accent-gold); color: var(--text-dark); display: flex; align-items: center; justify-content: center; gap: 8px;">
-              <i data-lucide="calendar"></i> 유주코칭 상담 신청하기
-            </button>
-            <div class="card-footer" style="padding:14px; font-size:13px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:20px; line-height:1.6;">
-              특징: 학생의 학습 유형과 다면적 능력을 분석하여 본인의 비전과 로드맵을 설계하고, 장기적인 대입 전략부터 오늘의 공부 습관까지 빈틈없이 코칭합니다.
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-// 글로벌 노출
-window.renderHomepage = renderHomepage;
-window.openPublicHomepage = openPublicHomepage;
-window.closePublicHomepage = closePublicHomepage;
-window.handleHomepageContact = handleHomepageContact;
-window.openConsultationModal = openConsultationModal;
-window.handleHomepageContactModal = handleHomepageContactModal;

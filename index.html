@@ -2,13 +2,67 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
+  <script>
+    window.consoleLogs = [];
+    (function() {
+      var capture = function(type, args) {
+        var msg = "[" + type + "] " + args.map(function(a) {
+          return typeof a === 'object' ? JSON.stringify(a) : String(a);
+        }).join(" ");
+        window.consoleLogs.push(msg);
+        var el = document.getElementById("debugConsoleLogs");
+        if (el) {
+          var p = document.createElement('p');
+          p.innerText = msg;
+          el.appendChild(p);
+        }
+      };
+      var origLog = console.log;
+      console.log = function() {
+        capture("LOG", Array.prototype.slice.call(arguments));
+        origLog.apply(console, arguments);
+      };
+      var origError = console.error;
+      console.error = function() {
+        capture("ERROR", Array.prototype.slice.call(arguments));
+        origError.apply(console, arguments);
+      };
+      var origWarn = console.warn;
+      console.warn = function() {
+        capture("WARN", Array.prototype.slice.call(arguments));
+        origWarn.apply(console, arguments);
+      };
+    })();
+
+    window.onerror = function(message, source, lineno, colno, error) {
+      var div = document.createElement('div');
+      div.style.position = 'fixed';
+      div.style.top = '0';
+      div.style.left = '0';
+      div.style.width = '100%';
+      div.style.backgroundColor = '#e11d48';
+      div.style.color = 'white';
+      div.style.padding = '20px';
+      div.style.zIndex = '999999';
+      div.style.fontSize = '15px';
+      div.style.fontFamily = 'monospace';
+      div.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+      div.innerHTML = '<h3 style="margin:0 0 10px 0; font-size:18px;">🚨 JavaScript 실행 오류 발생</h3>' + 
+                      '<strong>오류 메시지:</strong> ' + message + '<br>' +
+                      '<strong>발생 파일:</strong> ' + source + '<br>' +
+                      '<strong>라인 번호:</strong> ' + lineno + '라인, ' + colno + '열';
+      var target = document.body || document.documentElement;
+      if (target) target.appendChild(div);
+      return false;
+    };
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>유주코칭국어학원 - 학원통합관리시스템</title>
   
   <!-- Font & Icons -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/lucide@latest"></script>
   
   <!-- Supabase JS Client SDK -->
@@ -20,7 +74,7 @@
 <body>
 
   <!-- 1. 로그인 / 비밀번호 변경 화면 -->
-  <div id="loginScreen" class="login-overlay">
+  <div id="loginScreen" class="login-overlay" style="display: none;">
     <!-- 로그인 폼 카드 -->
     <div id="loginCard" class="login-card">
       <div class="login-header">
@@ -86,7 +140,7 @@
   </div>
 
   <!-- 1-2. 퍼블릭 학원 소개 홈페이지 화면 -->
-  <div id="publicHomepageScreen" class="public-homepage-overlay" style="display: none;">
+  <div id="publicHomepageScreen" class="public-homepage-overlay" style="display: block;">
     <!-- 동적으로 렌더링 예정 -->
   </div>
 
@@ -127,6 +181,9 @@
       <!-- 동적 모달 콘텐츠 로딩 -->
     </div>
   </div>
+
+  <!-- 디버그 콘솔 로그 콘테이너 -->
+  <div id="debugConsoleLogs" style="display: none;"></div>
 
   <!-- 비즈니스 로직 스크립트 로드 -->
   <script src="mockData.js"></script>
