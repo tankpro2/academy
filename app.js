@@ -77,30 +77,49 @@ async function initializeApp() {
   let parseSuccess = false;
   if (cachedUser) {
     try {
-      state.currentUser = JSON.parse(cachedUser);
-      if (state.currentUser && state.currentUser.username) {
+      const parsed = JSON.parse(cachedUser);
+      if (parsed && parsed.username && parsed.role) {
+        state.currentUser = parsed;
         parseSuccess = true;
+      } else {
+        try { localStorage.removeItem("yuju_logged_user"); } catch (ex) {}
       }
     } catch (e) {
       console.error("Failed to parse cached user:", e);
       state.currentUser = null;
+      try { localStorage.removeItem("yuju_logged_user"); } catch (ex) {}
     }
   }
   
-  if (parseSuccess) {
+  if (parseSuccess && state.currentUser) {
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("appScreen").style.display = "flex";
     
     // 유저 프로필 업데이트
-    document.getElementById("profileName").innerText = state.currentUser.username;
+    document.getElementById("profileName").innerText = state.currentUser.username || "";
     document.getElementById("profileRole").innerText = getRoleKorean(state.currentUser.role);
     
     // 데이터 불러오기 및 대시보드 진입
-    if (supabaseClient) {
-      await loadAllData();
+    try {
+      if (supabaseClient) {
+        await loadAllData();
+      }
+    } catch (err) {
+      console.warn("기존 세션 데이터 로딩 중 에러 발생, 오프라인 Fallback으로 로드합니다:", err);
+      loadOfflineMockData();
     }
-    renderSidebarMenu();
-    navigate("dashboard");
+    
+    try {
+      renderSidebarMenu();
+      navigate("dashboard");
+    } catch (renderErr) {
+      console.error("화면 렌더링 중 치명적 에러:", renderErr);
+      try {
+        localStorage.removeItem("yuju_logged_user");
+      } catch (e) {}
+      state.currentUser = null;
+      openPublicHomepage();
+    }
   } else {
     // 퍼블릭 홈페이지 표출
     openPublicHomepage();
@@ -417,9 +436,11 @@ function handleLogout() {
 // 7. 사이드바 메뉴 동적 렌더링
 function renderSidebarMenu() {
   const nav = document.getElementById("sidebarMenu");
+  if (!nav) return;
   nav.innerHTML = "";
   
-  const role = state.currentUser.role;
+  if (!state.currentUser) return;
+  const role = state.currentUser.role || "student";
   
   // 전체 메뉴 풀리스트 정의
   const allMenus = [
@@ -428,6 +449,7 @@ function renderSidebarMenu() {
     { key: "students", label: "학생 관리", icon: "users", roles: ["director", "teacher", "assistant", "student"] },
     { key: "teachers", label: "강사 관리", icon: "graduation-cap", roles: ["director", "teacher"] },
     { key: "enrollments", label: "수강 관리(시간표)", icon: "calendar-days", roles: ["director", "teacher", "assistant", "student"] },
+    { key: "studentEnrollments", label: "학생별 시간표", icon: "user-check", roles: ["director", "teacher", "assistant", "student"] },
     { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant", "student"] }
   ];
   
@@ -470,6 +492,9 @@ function navigate(viewKey) {
       break;
     case "enrollments":
       renderEnrollments();
+      break;
+    case "studentEnrollments":
+      renderStudentEnrollments();
       break;
     case "progress":
       renderProgress();
@@ -1647,6 +1672,7 @@ async function handleNewTeacher(event) {
 }
 
 // 2. 강사 근무 계획 수립 (원장 전용)
+// 2. 강사 근무 계획 수립 (원장 전용)
 function renderTeacherPlan() {
   const target = document.getElementById("teacherTabContent");
   
@@ -1660,27 +1686,8 @@ function renderTeacherPlan() {
     if (window.lucide) window.lucide.createIcons();
     return;
   }
-  
-  let rows = state.teacherSchedules.map(sch => {
-    const tc = state.teachers.find(t => t.id === sch.teacherId);
-    if (!tc) return "";
-    return `
-      <tr>
-        <td><strong>${escapeHTML(tc.name)}</strong></td>
-        <td>${sch.dayOfWeek}요일</td>
-        <td>${sch.startTime} ~ ${sch.endTime}</td>
-        <td>
-          <button class="btn btn-danger" style="padding:4px 8px; font-size:11px;" onclick="deleteTeacherSchedule('${sch.id}')">삭제</button>
-        </td>
-      </tr>
-    `;
-  }).join("");
-  
-  if (rows === "") {
-    rows = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">등록된 강사 계획이 없습니다.</td></tr>`;
-  }
 
-  // 요일별 강사 계획 리스트 데이터 생성
+  // 1. 요일별 강사 계획 리스트 데이터 생성
   const days = ["월", "화", "수", "목", "금", "토", "일"];
   const weekdayHTML = days.map(day => {
     const daySchedules = state.teacherSchedules.filter(sch => sch.dayOfWeek === day);
@@ -1714,38 +1721,76 @@ function renderTeacherPlan() {
     `;
   }).join("");
 
-  target.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <h3 style="font-weight:700; font-size:16px;">강사별 주간 고정 계획 리스트</h3>
-      <button class="btn btn-emerald" onclick="openNewScheduleModal()"><i data-lucide="plus"></i> 주간 일정 수립</button>
-    </div>
+  // 2. 강사 근무 월간 캘린더 생성
+  const [year, month] = opsYearMonth.split("-").map(Number);
+  const firstDayIndex = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dayOfWeekMap = ["일", "월", "화", "수", "목", "금", "토"];
+
+  let calendarCells = "";
+  for (let i = 0; i < firstDayIndex; i++) {
+    calendarCells += `<div class="calendar-cell inactive"></div>`;
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const curDate = new Date(year, month - 1, d);
+    const dayName = dayOfWeekMap[curDate.getDay()];
     
-    <div class="card" style="margin-bottom: 32px;">
-      <div class="table-responsive">
-        <table class="yuju-table">
-          <thead>
-            <tr>
-              <th>강사명</th>
-              <th>요일</th>
-              <th>가동 계획시간 (10분 단위)</th>
-              <th>작업</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    const daySchedules = state.teacherSchedules.filter(sch => sch.dayOfWeek === dayName);
+    
+    let tcBadges = daySchedules.map(sch => {
+      const tc = state.teachers.find(t => t.id === sch.teacherId);
+      if (!tc) return "";
+      return `<div style="font-size:11px; background:rgba(19,92,57,0.08); color:var(--primary-color); border:1px solid rgba(19,92,57,0.2); border-radius:4px; padding:3px 6px; margin-top:4px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+        👩‍🏫 ${escapeHTML(tc.name)} <span style="font-size:10px; font-weight:600; opacity:0.85;">(${sch.startTime}~${sch.endTime})</span>
+      </div>`;
+    }).join("");
 
-    <!-- 요일별 강사 계획 리스트 섹션 -->
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; margin-top:32px; border-top:1px solid var(--border-color); padding-top:24px;">
-      <h3 style="font-weight:700; font-size:16px;">요일별 강사 계획 리스트</h3>
+    if (tcBadges === "") {
+      tcBadges = `<span style="font-size:10px; color:var(--text-muted); display:block; margin-top:4px;">-</span>`;
+    }
+
+    calendarCells += `
+      <div class="calendar-cell operating" style="min-height:80px; align-items:flex-start; justify-content:flex-start; text-align:left; padding:8px;">
+        <span class="day-num" style="font-weight:800; font-size:12px;">${d}</span>
+        <div style="width:100%; margin-top:2px;">
+          ${tcBadges}
+        </div>
+      </div>
+    `;
+  }
+
+  target.innerHTML = `
+    <!-- 1. 요일별 강사 계획 리스트 섹션 (최상단 노출) -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 style="font-weight:700; font-size:16px;">📌 요일별 강사 계획 리스트</h3>
       <button class="btn btn-emerald" onclick="openNewScheduleModal()"><i data-lucide="plus"></i> 주간 일정 수립</button>
     </div>
 
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:16px; margin-bottom:24px;">
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:14px; margin-bottom:32px;">
       ${weekdayHTML}
+    </div>
+
+    <!-- 2. 강사 근무 월간 캘린더 섹션 (신규 추가) -->
+    <div class="card" style="margin-top:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div class="card-title" style="margin-bottom:0;">🗓 강사 근무 월간 캘린더</div>
+        <select id="teacherMonthSelector" onchange="changeOpsMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700;">
+          <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
+          <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
+          <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
+        </select>
+      </div>
+
+      <div class="calendar-grid">
+        <div class="calendar-day-label" style="color:var(--accent-red);">일</div>
+        <div class="calendar-day-label">월</div>
+        <div class="calendar-day-label">화</div>
+        <div class="calendar-day-label">수</div>
+        <div class="calendar-day-label">목</div>
+        <div class="calendar-day-label">금</div>
+        <div class="calendar-day-label">토</div>
+        ${calendarCells}
+      </div>
     </div>
   `;
   if (window.lucide) window.lucide.createIcons();
@@ -2102,6 +2147,42 @@ let scheduleViewMode = "daily"; // daily: 일별등록표, weekly: 주간등록�
 
 function renderEnrollments() {
   const container = document.getElementById("mainContent");
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>수강 관리 (시간표)</h1>
+        <p>학원 전체 종합 시간표를 일별/주간 학년군별 그리드로 조회합니다.</p>
+      </div>
+    </div>
+    
+    <!-- 학원 종합 그리드 시간표 테이블 섹션 -->
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div class="card-title" style="margin-bottom:0;">📊 학원 종합 그리드 시간표 (가로: 학년군 / 세로: 시간)</div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary ${scheduleViewMode === 'daily' ? 'btn-emerald' : ''}" onclick="toggleTimetableMode('daily')">일별 그리드</button>
+          <button class="btn btn-secondary ${scheduleViewMode === 'weekly' ? 'btn-emerald' : ''}" onclick="toggleTimetableMode('weekly')">주간 그리드</button>
+        </div>
+      </div>
+      
+      <div style="margin-bottom:12px;">
+        <strong>기준일자 선택:</strong>
+        <input type="date" id="gridDateSelector" value="${state.selectedDate}" onchange="changeGridDate(this.value)" style="padding:6px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+      </div>
+      
+      <div id="timetableGridTarget"></div>
+    </div>
+  `;
+  
+  if (window.lucide) window.lucide.createIcons();
+  
+  // 그리드 시간표 렌더링
+  renderGridTimetable();
+}
+
+function renderStudentEnrollments() {
+  const container = document.getElementById("mainContent");
   
   // 로그인한 사용자가 학생인 경우 자동으로 본인 고정
   if (state.currentUser.role === 'student') {
@@ -2116,23 +2197,20 @@ function renderEnrollments() {
     <option value="${s.id}" ${enrollSelectedStudentId === s.id ? 'selected' : ''}>${escapeHTML(s.name)} (${escapeHTML(s.school)} ${s.grade}학년)</option>
   `).join("");
   
-  // (1) 월간 수강 캘린더 렌더링
+  // 월간 수강 캘린더 렌더링
   const [year, month] = opsYearMonth.split("-").map(Number);
   const firstDayIndex = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthOps = state.monthlyOperations[opsYearMonth] || {};
   
   let cellsHTML = "";
-  // 빈칸
   for (let i = 0; i < firstDayIndex; i++) {
     cellsHTML += `<div class="calendar-cell inactive"></div>`;
   }
-  // 일자별 수강 상태 체크
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
     const op = monthOps[dateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
     
-    // 이 날 학생의 수강신청 정보가 있는지 탐색
     const enr = state.enrollments.find(e => e.studentId === enrollSelectedStudentId && e.date === dateStr);
     
     let cellClass = "operating";
@@ -2157,11 +2235,10 @@ function renderEnrollments() {
   container.innerHTML = `
     <div class="page-header">
       <div class="page-title">
-        <h1>수강 관리 (시간표)</h1>
-        <p>학생들의 월간 수강 신청 캘린더 조회 및 일별/주간 학년별 그리드 시간표를 제공합니다.</p>
+        <h1>학생별 시간표</h1>
+        <p>학생별 월간 수강 신청 캘린더를 조회하고 일자별 일정을 관리합니다.</p>
       </div>
       <div class="action-bar">
-        <!-- 원장이 학생 개별 수정 권한 조정용 토글 배치 -->
         ${state.currentUser.role === 'director' ? `
           <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
             <span style="font-size:12px; font-weight:700;">학생/학부모 수강 수정 허용:</span>
@@ -2171,7 +2248,6 @@ function renderEnrollments() {
       </div>
     </div>
     
-    <!-- 1. 학생별 월간 일정 조회 및 등록 섹션 -->
     <div class="card">
       <div class="card-title">🗓 학생별 월간 수강 캘린더</div>
       
@@ -2199,44 +2275,34 @@ function renderEnrollments() {
         ${cellsHTML}
       </div>
     </div>
-    
-    <!-- 2. 대형 그리드 시간표 테이블 섹션 -->
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-        <div class="card-title" style="margin-bottom:0;">📊 학원 종합 그리드 시간표 (가로: 학년군 / 세로: 시간)</div>
-        <div style="display:flex; gap:6px;">
-          <button class="btn btn-secondary ${scheduleViewMode === 'daily' ? 'btn-emerald' : ''}" onclick="toggleTimetableMode('daily')">일별 그리드</button>
-          <button class="btn btn-secondary ${scheduleViewMode === 'weekly' ? 'btn-emerald' : ''}" onclick="toggleTimetableMode('weekly')">주간 그리드</button>
-        </div>
-      </div>
-      
-      <div style="margin-bottom:12px;">
-        <strong>기준일자 선택:</strong>
-        <input type="date" id="gridDateSelector" value="${state.selectedDate}" onchange="changeGridDate(this.value)" style="padding:6px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
-      </div>
-      
-      <div id="timetableGridTarget"></div>
-    </div>
   `;
   
   if (window.lucide) window.lucide.createIcons();
   
-  // 원장의 권한 토글 스위치 상태 동기화
   if (state.currentUser.role === 'director') {
-    // 임의의 학생 권한 플래그 로딩 (isEditAllowed)
     const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
     if (targetStudent) {
       document.getElementById("allowEditToggle").checked = !!targetStudent.isEditAllowed;
     }
   }
-  
-  // 그리드 시간표 렌더링
-  renderGridTimetable();
 }
 
 function changeEnrollStudent(stId) {
   enrollSelectedStudentId = stId;
-  renderEnrollments();
+  if (state.currentView === 'studentEnrollments') {
+    renderStudentEnrollments();
+  } else {
+    renderEnrollments();
+  }
+}
+
+function changeOpsMonth(ym) {
+  opsYearMonth = ym;
+  if (state.currentView === 'studentEnrollments') {
+    renderStudentEnrollments();
+  } else {
+    renderEnrollments();
+  }
 }
 
 function changeGridDate(dateVal) {
@@ -2413,6 +2479,7 @@ function getGradeGroup(gradeStr) {
 // 대형 그리드 렌더러
 function renderGridTimetable() {
   const target = document.getElementById("timetableGridTarget");
+  if (!target) return;
   
   // 세로 시간 축 범위 생성 (30분 간격, 학원 운영 기준 13:00 ~ 22:00)
   const startHour = 13;
@@ -2483,7 +2550,8 @@ function renderGridTimetable() {
           `;
         }).join("");
         
-        tableHTML += `<td>${badgesHTML}</td>`;
+        const cellContainer = badgesHTML ? `<div class="timetable-badge-grid">${badgesHTML}</div>` : '';
+        tableHTML += `<td>${cellContainer}</td>`;
       });
       
       tableHTML += `</tr>`;
@@ -2540,14 +2608,15 @@ function renderGridTimetable() {
           const nameClass = isNew ? "name new-student-highlight" : "name";
           
           return `
-            <div class="timetable-card-badge" style="margin-bottom:4px;">
+            <div class="timetable-card-badge">
               <span class="${nameClass}">${escapeHTML(st.name)}</span>
               <span class="time-text">${enr.startTime}~${enr.endTime}</span>
             </div>
           `;
         }).join("");
         
-        tableHTML += `<td>${badgesHTML}</td>`;
+        const cellContainer = badgesHTML ? `<div class="timetable-badge-grid">${badgesHTML}</div>` : '';
+        tableHTML += `<td>${cellContainer}</td>`;
       });
       
       tableHTML += `</tr>`;
@@ -2562,6 +2631,13 @@ function renderGridTimetable() {
 // --- ⑥ 진도 관리 뷰 ---
 let progressTab = "plan"; // plan: 당일계획수립, result: 당일실적등록, stats: 진도이력조회
 
+// 학생 계획수립 모드 진입 처리 (대기화면 → 실제 계획 입력화면)
+function enterStudentPlanMode() {
+  state.hasEnteredPlanMode = true;
+  renderProgress();
+}
+window.enterStudentPlanMode = enterStudentPlanMode;
+
 function renderProgress() {
   const container = document.getElementById("mainContent");
   
@@ -2573,11 +2649,9 @@ function renderProgress() {
     progressStudentId = state.students[0].id;
   }
 
-  // 학생 당일 계획 수립 대기화면 조건 확인
-  const isStudent = state.currentUser.role === 'student';
-  const plansToday = state.dailyPlans.filter(p => p.studentId === progressStudentId && p.date === state.selectedDate);
-  
-  if (isStudent && plansToday.length === 0 && !state.hasEnteredPlanMode) {
+  // 진도관리 대기화면 조건 확인 (학생 계정일 때만 첫 진입 시 표출)
+  const isStudent = state.currentUser && state.currentUser.role === 'student';
+  if (isStudent && !state.hasEnteredPlanMode) {
     const quotes = window.mockData.quotes || [
       "배움의 깊이를 더하는 상아탑에서의 하루가 미래를 바꿉니다.",
       "독서는 정신의 음악이다. - 소크라테스"
@@ -2676,12 +2750,7 @@ function renderProgressTabContent(studentId) {
   if (progressTab === "plan") {
     // --- 1. 당일 계획 수립 탭 ---
     
-// 학생 계획수립 모드 진입 처리
-function enterStudentPlanMode() {
-  state.hasEnteredPlanMode = true;
-  renderProgress();
-}
-window.enterStudentPlanMode = enterStudentPlanMode;
+
 
     let planInputs = "";
     // 이미 등록된 계획이 있는 경우 리스트 표출
@@ -3145,7 +3214,7 @@ function handleHomepageContactModal(event, field) {
 function getHomepageHTML(isPublic) {
   return `
     ${isPublic ? `
-      <nav class="homepage-nav" style="display:flex; justify-content:space-between; align-items:center; padding: 20px 40px; background: white; border-bottom: 1px solid var(--border-color); position:sticky; top:0; z-index:1000;">
+      <nav class="homepage-nav" style="display:flex; justify-content:space-between; align-items:center; padding: 12px 28px; background: white; border-bottom: 1px solid var(--border-color); position:sticky; top:0; z-index:1000;">
         <div class="logo-area" style="display:flex; align-items:center; gap:8px; font-family: var(--font-title); font-weight:800; font-size:22px; color: var(--primary-color);">
           <i data-lucide="graduation-cap" style="width:28px; height:28px;"></i>
           <span style="font-weight:900;">EduCare 상아탑</span>
@@ -3162,32 +3231,32 @@ function getHomepageHTML(isPublic) {
       </nav>
     ` : ''}
     
-    <div class="homepage-container one-screen" id="about" style="display:flex; flex-direction:column; gap:30px; padding: 40px;">
+    <div class="homepage-container one-screen" id="about" style="display:flex; flex-direction:column; gap:16px; padding: 16px 28px;">
       <!-- 상단: 영웅 섹션 (EduCare 문구 반영) -->
-      <section class="hero-section compact-top" style="background: linear-gradient(135deg, rgba(19, 92, 57, 0.9) 0%, rgba(13, 70, 42, 0.95) 100%), url('ivory_tower.jpg') no-repeat center center; background-size: cover; padding: 50px 40px; border-radius: var(--radius-lg); color: white; display: grid; grid-template-columns: 1.5fr 1fr; gap: 30px; align-items: center; box-shadow: var(--shadow-lg);">
+      <section class="hero-section compact-top" style="background: linear-gradient(135deg, rgba(19, 92, 57, 0.9) 0%, rgba(13, 70, 42, 0.95) 100%), url('ivory_tower.jpg') no-repeat center center; background-size: cover; padding: 28px 32px; border-radius: var(--radius-lg); color: white; display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; align-items: center; box-shadow: var(--shadow-lg);">
         <div>
-          <span style="display: inline-block; padding: 4px 12px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 13.5px; font-weight: 700; color: #fcd34d; margin-bottom: 16px; letter-spacing:0.5px;">
+          <span style="display: inline-block; padding: 3px 10px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 12px; font-weight: 700; color: #fcd34d; margin-bottom: 10px; letter-spacing:0.5px;">
             ✨ 대치동 20년 경력의 검증된 프리미엄 명품 코칭
           </span>
-          <h1 style="color:white; margin:0 0 16px 0; font-family: var(--font-title); font-size: 38px; font-weight:900; line-height:1.3; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+          <h1 style="color:white; margin:0 0 10px 0; font-family: var(--font-title); font-size: 26px; font-weight:900; line-height:1.3; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
             배움의 깊이를 더하는 상아탑<br>독서력 진단부터 대입 입시 로드맵까지
           </h1>
-          <p style="color:rgba(255,255,255,0.9); font-size:15.5px; margin-top:8px; line-height:1.7; font-weight:500;">
+          <p style="color:rgba(255,255,255,0.9); font-size:13.5px; margin-top:6px; line-height:1.6; font-weight:500;">
             단순 주입식 교육을 넘어 학생의 문해력을 과학적으로 트레이닝하고,<br>수시 학생부 관리와 심층 상담을 통해 최적의 합격 전략을 설계합니다.
           </p>
-          <div style="display:flex; gap:12px; margin-top:24px;">
-            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="background-color: var(--accent-gold); color: var(--text-dark); font-weight:800; border-radius:30px; padding:12px 24px; font-size:15px; box-shadow: 0 4px 12px rgba(197, 155, 39, 0.3);">
+          <div style="display:flex; gap:10px; margin-top:14px;">
+            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="background-color: var(--accent-gold); color: var(--text-dark); font-weight:800; border-radius:30px; padding:9px 18px; font-size:13px; box-shadow: 0 4px 12px rgba(197, 155, 39, 0.3);">
               무료 상담 신청하기
             </button>
-            <button class="btn btn-secondary" onclick="document.getElementById('programs').scrollIntoView({behavior: 'smooth'})" style="background: transparent; color: white; border: 1px solid white; border-radius:30px; padding:12px 24px; font-size:15px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('programs').scrollIntoView({behavior: 'smooth'})" style="background: transparent; color: white; border: 1px solid white; border-radius:30px; padding:9px 18px; font-size:13px;">
               프로그램 둘러보기
             </button>
           </div>
         </div>
         
         <!-- 교육 철학 및 연락처 -->
-        <div style="background: rgba(255, 255, 255, 0.08); padding: 24px; border-radius: var(--radius-md); font-size: 13.5px; line-height: 1.8; border-left: 4px solid var(--accent-gold); backdrop-filter: blur(5px);">
-          <strong style="color:#fcd34d; font-size: 15px; display:block; margin-bottom:8px;">🏫 상아탑 EduCare 안내</strong>
+        <div style="background: rgba(255, 255, 255, 0.08); padding: 16px; border-radius: var(--radius-md); font-size: 12.5px; line-height: 1.7; border-left: 4px solid var(--accent-gold); backdrop-filter: blur(5px);">
+          <strong style="color:#fcd34d; font-size: 13px; display:block; margin-bottom:6px;">🏫 상아탑 EduCare 안내</strong>
           📞 <strong>상담 대표 번호:</strong> <a href="tel:02-555-6910" style="color:white; font-weight:700; text-decoration:underline;">02-555-6910</a><br>
           📍 <strong>국어학원:</strong> 도곡로93길 9, 3층 (도곡렉슬상가 인근)<br>
           📍 <strong>상담교습소:</strong> 선릉로62길 32-1, 1층<br>
@@ -3198,52 +3267,52 @@ function getHomepageHTML(isPublic) {
       </section>
 
       <!-- 하단: 좌우 2박스 배치 -->
-      <div class="cards-row" id="programs" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; scroll-margin-top: 100px;">
+      <div class="cards-row" id="programs" style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; scroll-margin-top: 80px;">
         <!-- 좌측 박스: 대치리드인 국어학원 -->
-        <div class="homepage-card compact-bottom left-card" style="background:white; padding:32px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
+        <div class="homepage-card compact-bottom left-card" style="background:white; padding:20px 24px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
           <div>
-            <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:16px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="margin:0; font-family:var(--font-title); font-size:24px; color:var(--text-dark);">대치리드인 국어학원</h2>
+            <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+              <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">대치리드인 국어학원</h2>
               <span class="badge badge-emerald">독해 및 국어 전문</span>
             </div>
-            <ul class="program-list" style="list-style:none; padding:0; margin:0 0 24px 0; display:flex; flex-direction:column; gap:10px;">
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> <strong>특허받은 수준별 맞춤 독서 코칭</strong></li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> 초등 / 중등 독서독해 체계적 훈련</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> 고등 국어 내신 및 수능 완벽 대비</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> 글쓰기 트레이닝 (논술 및 수행평가)</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--primary-color);"></i> 비문학 구조 독해 및 문학 작품 강독</li>
+            <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> <strong>특허받은 수준별 맞춤 독서 코칭</strong></li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 초등 / 중등 독서독해 체계적 훈련</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 고등 국어 내신 및 수능 완벽 대비</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 글쓰기 트레이닝 (논술 및 수행평가)</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 비문학 구조 독해 및 문학 작품 강독</li>
             </ul>
           </div>
           <div>
-            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="width: 100%; padding: 14px; font-weight: 700; font-size:15px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
               <i data-lucide="calendar"></i> 대치리드인 상담 신청하기
             </button>
-            <div class="card-footer" style="padding:14px; font-size:13px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:20px; line-height:1.6;">
+            <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
               특징: 리드인 독서진단검사를 통해 학생의 읽기 능력을 정확하게 진단하고, 개인의 레벨에 맞는 도서 선정 및 전담 강사의 1:1 밀착 피드백을 제공합니다.
             </div>
           </div>
         </div>
 
         <!-- 우측 박스: 유주코칭 진학상담소 -->
-        <div class="homepage-card compact-bottom right-card" style="background:white; padding:32px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
+        <div class="homepage-card compact-bottom right-card" style="background:white; padding:20px 24px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
           <div>
-            <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:16px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="margin:0; font-family:var(--font-title); font-size:24px; color:var(--text-dark);">유주코칭 진학상담소</h2>
+            <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+              <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">유주코칭 진학상담소</h2>
               <span class="badge" style="background:var(--accent-gold-light); color:var(--accent-gold);">진로 및 진학 컨설팅</span>
             </div>
-            <ul class="program-list" style="list-style:none; padding:0; margin:0 0 24px 0; display:flex; flex-direction:column; gap:10px;">
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> <strong>1:1 학습유형 분석 및 진로 설계</strong></li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> 개인 성향에 맞춘 자기주도학습 코칭</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> 중/고등부 생활기록부 및 수행평가 관리</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> 대입 전략 수시/정시 원서 접수 지도</li>
-              <li style="display:flex; align-items:center; gap:8px; font-size:14.5px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold);"></i> 학습 의욕 고취 및 메타인지 강화</li>
+            <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> <strong>1:1 학습유형 분석 및 진로 설계</strong></li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 개인 성향에 맞춘 자기주도학습 코칭</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 중/고등부 생활기록부 및 수행평가 관리</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 대입 전략 수시/정시 원서 접수 지도</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 학습 의욕 고취 및 메타인지 강화</li>
             </ul>
           </div>
           <div>
-            <button class="btn btn-emerald" onclick="openConsultationModal('진로진학컨설팅')" style="width: 100%; padding: 14px; font-weight: 700; font-size:15px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--accent-gold); color: var(--text-dark); display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button class="btn btn-emerald" onclick="openConsultationModal('진로진학컨설팅')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--accent-gold); color: var(--text-dark); display: flex; align-items: center; justify-content: center; gap: 8px;">
               <i data-lucide="calendar"></i> 유주코칭 상담 신청하기
             </button>
-            <div class="card-footer" style="padding:14px; font-size:13px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:20px; line-height:1.6;">
+            <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
               특징: 학생의 학습 유형과 다면적 능력을 분석하여 본인의 비전과 로드맵을 설계하고, 장기적인 대입 전략부터 오늘의 공부 습관까지 빈틈없이 코칭합니다.
             </div>
           </div>
@@ -3260,3 +3329,4 @@ window.closePublicHomepage = closePublicHomepage;
 window.handleHomepageContact = handleHomepageContact;
 window.openConsultationModal = openConsultationModal;
 window.handleHomepageContactModal = handleHomepageContactModal;
+window.renderStudentEnrollments = renderStudentEnrollments;

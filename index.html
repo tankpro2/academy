@@ -2,6 +2,9 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <script>
     window.consoleLogs = [];
     (function() {
@@ -79,7 +82,7 @@
     <div id="loginCard" class="login-card">
       <div class="login-header">
         <div class="logo"><i data-lucide="book-open"></i></div>
-        <h1>유주 국어학원</h1>
+        <h1>대치리드인 유주코칭국어학원</h1>
         <p>학원통합관리시스템 로그인</p>
       </div>
       
@@ -141,7 +144,110 @@
 
   <!-- 1-2. 퍼블릭 학원 소개 홈페이지 화면 -->
   <div id="publicHomepageScreen" class="public-homepage-overlay" style="display: block;">
-    <!-- 동적으로 렌더링 예정 -->
+    <nav class="homepage-nav" style="display:flex; justify-content:space-between; align-items:center; padding: 12px 28px; background: white; border-bottom: 1px solid var(--border-color); position:sticky; top:0; z-index:1000;">
+      <div class="logo-area" style="display:flex; align-items:center; gap:8px; font-family: var(--font-title); font-weight:800; font-size:22px; color: var(--primary-color);">
+        <i data-lucide="graduation-cap" style="width:28px; height:28px;"></i>
+        <span style="font-weight:900;">EduCare 상아탑</span>
+      </div>
+      <div class="nav-links" style="display:flex; gap:30px; font-weight:700; font-size:15px;">
+        <a href="#about" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;">학원 소개</a>
+        <a href="#programs" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;">대표 프로그램</a>
+        <a href="#blog" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;">교육 블로그</a>
+        <a href="#contact" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;">상담 예약</a>
+      </div>
+      <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:700; background-color: var(--text-dark); color: white; border:none; padding:10px 20px; border-radius:30px; cursor:pointer;">
+        <i data-lucide="lock" style="width:16px; height:16px;"></i> 학원관리 시스템 로그인
+      </button>
+    </nav>
+    
+    <div class="homepage-container one-screen" id="about" style="display:flex; flex-direction:column; gap:16px; padding: 16px 28px;">
+      <!-- 상단: 영웅 섹션 (EduCare 문구 반영) -->
+      <section class="hero-section compact-top" style="background: linear-gradient(135deg, rgba(19, 92, 57, 0.9) 0%, rgba(13, 70, 42, 0.95) 100%), url('ivory_tower.jpg') no-repeat center center; background-size: cover; padding: 28px 32px; border-radius: var(--radius-lg); color: white; display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; align-items: center; box-shadow: var(--shadow-lg);">
+        <div>
+          <span style="display: inline-block; padding: 3px 10px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 12px; font-weight: 700; color: #fcd34d; margin-bottom: 10px; letter-spacing:0.5px;">
+            ✨ 대치동 20년 경력의 검증된 프리미엄 명품 코칭
+          </span>
+          <h1 style="color:white; margin:0 0 10px 0; font-family: var(--font-title); font-size: 26px; font-weight:900; line-height:1.3; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+            배움의 깊이를 더하는 상아탑<br>독서력 진단부터 대입 입시 로드맵까지
+          </h1>
+          <p style="color:rgba(255,255,255,0.9); font-size:13.5px; margin-top:6px; line-height:1.6; font-weight:500;">
+            단순 주입식 교육을 넘어 학생의 문해력을 과학적으로 트레이닝하고,<br>수시 학생부 관리와 심층 상담을 통해 최적의 합격 전략을 설계합니다.
+          </p>
+          <div style="display:flex; gap:10px; margin-top:14px;">
+            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="background-color: var(--accent-gold); color: var(--text-dark); font-weight:800; border-radius:30px; padding:9px 18px; font-size:13px; box-shadow: 0 4px 12px rgba(197, 155, 39, 0.3);">
+              무료 상담 신청하기
+            </button>
+            <button class="btn btn-secondary" onclick="document.getElementById('programs').scrollIntoView({behavior: 'smooth'})" style="background: transparent; color: white; border: 1px solid white; border-radius:30px; padding:9px 18px; font-size:13px;">
+              프로그램 둘러보기
+            </button>
+          </div>
+        </div>
+        
+        <!-- 교육 철학 및 연락처 -->
+        <div style="background: rgba(255, 255, 255, 0.08); padding: 16px; border-radius: var(--radius-md); font-size: 12.5px; line-height: 1.7; border-left: 4px solid var(--accent-gold); backdrop-filter: blur(5px);">
+          <strong style="color:#fcd34d; font-size: 13px; display:block; margin-bottom:6px;">🏫 상아탑 EduCare 안내</strong>
+          📞 <strong>상담 대표 번호:</strong> <a href="tel:02-555-6910" style="color:white; font-weight:700; text-decoration:underline;">02-555-6910</a><br>
+          📍 <strong>국어학원:</strong> 도곡로93길 9, 3층 (도곡렉슬상가 인근)<br>
+          📍 <strong>상담교습소:</strong> 선릉로62길 32-1, 1층<br>
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.1); font-style:italic; font-size:12.5px; color:#e2e8f0;">
+            "글을 제대로 읽지 못하는 학생은 스스로 공부하는 힘을 기를 수 없습니다. 대치리드인에서 기본 문해력을 다지고 1:1 맞춤 대입 컨설팅으로 비전을 그립니다."
+          </div>
+        </div>
+      </section>
+
+      <!-- 하단: 좌우 2박스 배치 -->
+      <div class="cards-row" id="programs" style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; scroll-margin-top: 80px;">
+        <!-- 좌측 박스: 대치리드인 국어학원 -->
+        <div class="homepage-card compact-bottom left-card" style="background:white; padding:20px 24px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
+          <div>
+            <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+              <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">대치리드인 국어학원</h2>
+              <span class="badge badge-emerald">독해 및 국어 전문</span>
+            </div>
+            <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> <strong>특허받은 수준별 맞춤 독서 코칭</strong></li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 초등 / 중등 독서독해 체계적 훈련</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 고등 국어 내신 및 수능 완벽 대비</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 글쓰기 트레이닝 (논술 및 수행평가)</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 비문학 구조 독해 및 문학 작품 강독</li>
+            </ul>
+          </div>
+          <div>
+            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <i data-lucide="calendar"></i> 대치리드인 상담 신청하기
+            </button>
+            <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
+              특징: 리드인 독서진단검사를 통해 학생의 읽기 능력을 정확하게 진단하고, 개인의 레벨에 맞는 도서 선정 및 전담 강사의 1:1 밀착 피드백을 제공합니다.
+            </div>
+          </div>
+        </div>
+
+        <!-- 우측 박스: 유주코칭 진학상담소 -->
+        <div class="homepage-card compact-bottom right-card" style="background:white; padding:20px 24px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
+          <div>
+            <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+              <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">유주코칭 진학상담소</h2>
+              <span class="badge" style="background:var(--accent-gold-light); color:var(--accent-gold);">진로 및 진학 컨설팅</span>
+            </div>
+            <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> <strong>1:1 학습유형 분석 및 진로 설계</strong></li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 개인 성향에 맞춘 자기주도학습 코칭</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 중/고등부 생활기록부 및 수행평가 관리</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 대입 전략 수시/정시 원서 접수 지도</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 학습 의욕 고취 및 메타인지 강화</li>
+            </ul>
+          </div>
+          <div>
+            <button class="btn btn-emerald" onclick="openConsultationModal('진로진학컨설팅')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--accent-gold); color: var(--text-dark); display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <i data-lucide="calendar"></i> 유주코칭 상담 신청하기
+            </button>
+            <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
+              특징: 학생의 학습 유형과 다면적 능력을 분석하여 본인의 비전과 로드맵을 설계하고, 장기적인 대입 전략부터 오늘의 공부 습관까지 빈틈없이 코칭합니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 2. 메인 애플리케이션 화면 -->
@@ -150,7 +256,7 @@
     <aside class="sidebar no-print">
       <div class="sidebar-header">
         <i data-lucide="book-open"></i>
-        <h2>유주 통합관리</h2>
+        <h2>대치리드인 유주코칭 통합관리</h2>
       </div>
       
       <div class="user-profile-badge">
@@ -186,7 +292,7 @@
   <div id="debugConsoleLogs" style="display: none;"></div>
 
   <!-- 비즈니스 로직 스크립트 로드 -->
-  <script src="mockData.js"></script>
-  <script src="app.js"></script>
+  <script src="mockData.js?v=10"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

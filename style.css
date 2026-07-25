@@ -602,17 +602,34 @@ table.yuju-table tr:hover td {
   width: 120px;
 }
 
+.timetable-badge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 900px) {
+  .timetable-badge-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .timetable-card-badge {
   background: var(--primary-light);
   border: 1px solid rgba(5, 150, 105, 0.3);
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: 4px 6px;
+  font-size: 11px;
   text-align: center;
-  margin: 2px auto;
-  width: fit-content;
-  max-width: 160px;
+  width: 100%;
   box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 .timetable-card-badge .name {
