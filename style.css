@@ -1427,6 +1427,53 @@ table.yuju-table tr:hover td {
   line-height: 1.8;
 }
 
+/* 생일 축하 팝업 전용 고급 스타일 */
+.birthday-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 999999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.birthday-card {
+  background: linear-gradient(135deg, #ffffff 0%, #fdfbf7 100%);
+  border: 2px solid var(--accent-gold);
+  border-radius: 24px;
+  width: 100%;
+  max-width: 520px;
+  padding: 40px 32px 32px 32px;
+  text-align: center;
+  box-shadow: 0 25px 50px -12px rgba(197, 155, 39, 0.45);
+  position: relative;
+  overflow: hidden;
+  animation: birthdayScaleUp 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.birthday-card::before {
+  content: '🎉✨🎂🎁✨🎉';
+  position: absolute;
+  top: 10px;
+  left: 0;
+  right: 0;
+  font-size: 18px;
+  letter-spacing: 12px;
+  opacity: 0.85;
+}
+
+@keyframes birthdayScaleUp {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
 /* 대시보드 2단 레이아웃 */
 .dashboard-grid {
   display: grid;

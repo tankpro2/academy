@@ -124,6 +124,9 @@ async function initializeApp() {
     // 퍼블릭 홈페이지 표출
     openPublicHomepage();
   }
+  
+  // 접속 시 원장님 생신 축하 팝업 자동 발동
+  setTimeout(showBirthdayPopup, 300);
 }
 
 // 한국어 역할 표시 변환 헬퍼
@@ -3330,3 +3333,56 @@ window.handleHomepageContact = handleHomepageContact;
 window.openConsultationModal = openConsultationModal;
 window.handleHomepageContactModal = handleHomepageContactModal;
 window.renderStudentEnrollments = renderStudentEnrollments;
+
+// --- 원장님 생신 축하 이쁜 팝업 모달 ---
+function showBirthdayPopup() {
+  if (document.getElementById("birthdayPopupOverlay")) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "birthdayPopupOverlay";
+  overlay.className = "birthday-overlay";
+  
+  overlay.innerHTML = `
+    <div class="birthday-card">
+      <div style="font-size: 44px; margin-bottom: 12px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.15));">🎂✨💐</div>
+      
+      <span style="display: inline-block; background: rgba(197, 155, 39, 0.15); color: #b45309; border: 1px solid rgba(197, 155, 39, 0.35); padding: 4px 14px; border-radius: 20px; font-size: 12.5px; font-weight: 800; margin-bottom: 14px; letter-spacing: 0.5px;">
+        SPECIAL CELEBRATION
+      </span>
+      
+      <h2 style="font-family: var(--font-title); font-size: 24px; font-weight: 900; color: var(--text-dark); margin: 0 0 16px 0; line-height: 1.35; word-break: keep-all;">
+        🎉 원장님의 생신을 진심으로 축하드립니다! 🎉
+      </h2>
+      
+      <div style="background: rgba(255, 255, 255, 0.95); border-radius: 16px; padding: 20px 22px; border: 1px solid #fef3c7; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 24px; text-align: left; line-height: 1.8; font-size: 14px; color: #334155;">
+        <p style="margin: 0 0 10px 0; font-weight: 800; color: var(--primary-color); font-size: 14.5px;">
+          ✨ 대치리드인 유주코칭국어학원의 든든한 버팀목이자 학생들의 비전을 밝혀주시는 원장님!
+        </p>
+        <p style="margin: 0 0 10px 0; font-weight: 500;">
+          늘 넘치는 열정과 깊이 있는 교육 철학으로 아이들의 올바른 성장과 미래를 성심껏 이끌어 주심에 진심으로 감사드립니다.
+        </p>
+        <p style="margin: 0; font-weight: 700; color: #b45309; font-size: 14px;">
+          오늘 하루, 세상에서 가장 행복하고 기쁨 가득한 날 보내시길 마음 깊이 축원합니다. 건강과 넉넉한 복이 늘 원장님 곁에 가득하시길 바라며, 언제나 감사하고 존경합니다! ❤️💐
+        </p>
+      </div>
+      
+      <button onclick="closeBirthdayPopup()" class="btn btn-emerald" style="width: 100%; padding: 13px; font-size: 15px; font-weight: 800; border-radius: 30px; background: linear-gradient(135deg, var(--primary-color) 0%, #047857 100%); color: white; border: none; cursor: pointer; box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35); display: flex; align-items: center; justify-content: center; gap: 8px;">
+        🎉 축하와 감사함으로 시작하기
+      </button>
+    </div>
+  `;
+  
+  document.body.appendChild(overlay);
+}
+
+function closeBirthdayPopup() {
+  const el = document.getElementById("birthdayPopupOverlay");
+  if (el) {
+    el.style.opacity = "0";
+    el.style.transition = "opacity 0.3s ease";
+    setTimeout(() => el.remove(), 300);
+  }
+}
+
+window.showBirthdayPopup = showBirthdayPopup;
+window.closeBirthdayPopup = closeBirthdayPopup;
