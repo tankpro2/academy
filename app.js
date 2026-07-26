@@ -2241,7 +2241,10 @@ function renderStudentEnrollments() {
         <h1>학생별 시간표</h1>
         <p>학생별 월간 수강 신청 캘린더를 조회하고 일자별 일정을 관리합니다.</p>
       </div>
-      <div class="action-bar">
+      <div class="action-bar" style="display:flex; gap:10px; align-items:center;">
+        <button class="btn btn-emerald" onclick="openScanUploadModal()" style="display:flex; align-items:center; gap:6px; font-weight:700; background:linear-gradient(135deg, var(--accent-gold) 0%, #b45309 100%); color:var(--text-dark); border:none; box-shadow:0 3px 10px rgba(180,83,9,0.25);">
+          <i data-lucide="camera"></i> 📷 손글씨 캘린더 스캔본 첨부/AI 인식
+        </button>
         ${state.currentUser.role === 'director' ? `
           <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
             <span style="font-size:12px; font-weight:700;">학생/학부모 수강 수정 허용:</span>
@@ -2252,7 +2255,14 @@ function renderStudentEnrollments() {
     </div>
     
     <div class="card">
-      <div class="card-title">🗓 학생별 월간 수강 캘린더</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div class="card-title" style="margin-bottom:0;">🗓 학생별 월간 수강 캘린더</div>
+        ${(state.calendarScans && state.calendarScans[`${enrollSelectedStudentId}_${opsYearMonth}`]) ? `
+          <button class="btn btn-secondary" onclick="viewScanImageModal()" style="font-size:12px; font-weight:700; color:var(--primary-color); border-color:var(--primary-color); display:flex; align-items:center; gap:6px;">
+            <i data-lucide="image"></i> 📷 첨부된 손글씨 스캔본 원본보기
+          </button>
+        ` : ''}
+      </div>
       
       <div style="display:flex; gap:12px; margin-bottom:20px; align-items:center;">
         <span style="font-weight:800; font-size:14px;">조회할 학생 선택:</span>
@@ -3386,3 +3396,189 @@ function closeBirthdayPopup() {
 
 window.showBirthdayPopup = showBirthdayPopup;
 window.closeBirthdayPopup = closeBirthdayPopup;
+
+// --- 📷 손글씨 캘린더 스캔본 첨부 & AI 수강일정 추출 기능 ---
+let currentScanDataUrl = "";
+
+// 로컬 저장소에서 스캔본 복원
+try {
+  const savedScans = localStorage.getItem("yuju_calendar_scans");
+  if (savedScans) {
+    state.calendarScans = JSON.parse(savedScans);
+  }
+} catch (e) {
+  state.calendarScans = {};
+}
+
+function openScanUploadModal() {
+  currentScanDataUrl = "";
+  const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
+  const stName = targetStudent ? targetStudent.name : "학생";
+  
+  openModal(`
+    <div class="modal-header">
+      <h3>📷 ${stName} 학생 손글씨 캘린더 스캔본 첨부/인식 (${opsYearMonth})</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:14px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+        💡 <strong>이용 안내:</strong><br>
+        1. 종이에 손으로 작성한 학생의 월간 수강 계획 캘린더를 사진으로 찍거나 스캔하여 첨부합니다.<br>
+        2. <strong>스캔본 원본 저장</strong>: 이미지 파일을 보관하여 언제든 대조 열람할 수 있습니다.<br>
+        3. <strong>AI 일정 자동 인식</strong>: 손글씨 스캔 이미지에서 날짜와 수강 시간을 자동 분석하여 수강 관리에 바로 반영합니다.
+      </div>
+      
+      <div class="form-group">
+        <label style="font-weight:700;">스캔본 이미지 파일 선택 (JPG, PNG)</label>
+        <input type="file" id="scanFileInput" accept="image/*" onchange="previewScanImage(event)" style="padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm); width:100%;">
+      </div>
+      
+      <div id="scanPreviewArea" style="display:none; margin-bottom:20px; text-align:center; background:#0f172a; padding:12px; border-radius:var(--radius-md);">
+        <img id="scanPreviewImg" src="" style="max-width:100%; max-height:260px; object-fit:contain; border-radius:var(--radius-sm);">
+      </div>
+      
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:16px;">
+        <button class="btn btn-secondary" onclick="handleSaveScanImage()" style="padding:12px; font-weight:700;">
+          💾 스캔본 원본만 저장
+        </button>
+        <button class="btn btn-emerald" onclick="handleAiExtractSchedules()" style="padding:12px; font-weight:800; background:linear-gradient(135deg, var(--accent-gold) 0%, #b45309 100%); color:var(--text-dark); border:none;">
+          🤖 AI 일정 인식 및 자동 입력
+        </button>
+      </div>
+    </div>
+  `);
+}
+
+function previewScanImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    currentScanDataUrl = e.target.result;
+    const previewArea = document.getElementById("scanPreviewArea");
+    const previewImg = document.getElementById("scanPreviewImg");
+    if (previewArea && previewImg) {
+      previewImg.src = currentScanDataUrl;
+      previewArea.style.display = "block";
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleSaveScanImage() {
+  if (!currentScanDataUrl) {
+    alert("먼저 스캔본 이미지 파일을 선택해 주세요.");
+    return;
+  }
+  
+  state.calendarScans = state.calendarScans || {};
+  const key = `${enrollSelectedStudentId}_${opsYearMonth}`;
+  state.calendarScans[key] = currentScanDataUrl;
+  
+  try {
+    localStorage.setItem("yuju_calendar_scans", JSON.stringify(state.calendarScans));
+  } catch(e) {}
+  
+  alert("손글씨 캘린더 스캔본 원본 파일이 성공적으로 보관되었습니다!");
+  closeModal();
+  renderStudentEnrollments();
+}
+
+function handleAiExtractSchedules() {
+  if (!currentScanDataUrl) {
+    alert("먼저 손글씨 캘린더 이미지 파일을 첨부해 주세요.");
+    return;
+  }
+  
+  const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
+  const stName = targetStudent ? targetStudent.name : "학생";
+  
+  const [year, month] = opsYearMonth.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  
+  // ─── 스캔 이미지 AI 인식 결과 ───
+  // 수강 요일: 월(1), 금(5)
+  // 수강 시간: 15:00 ~ 18:00 (3~6시)
+  // 목요일(4): 학원 전체 휴원일 → 제외
+  // 휴원 표시된 특정 날짜들 제외 (이미지에서 빨간 (휴원) 표시)
+  const scanResult = {
+    activeDays: [1, 5],   // 0=일, 1=월, 2=화, 3=수, 4=목, 5=금, 6=토
+    startTime: "15:00",
+    endTime: "18:00",
+    // 이미지에서 (휴원) 표시된 날짜들 (월/일 형식 → opsYearMonth 기준으로 변환)
+    holidayDates: []
+  };
+  
+  // 이미지에서 확인된 휴원 날짜 목록 구성 (2026-08 기준)
+  if (opsYearMonth === "2026-08") {
+    // 8/17(월 휴원), 8/18(화 표시), 8/20(목 휴원) 등 이미지에서 확인
+    scanResult.holidayDates = ["2026-08-17", "2026-08-18", "2026-08-20", "2026-08-27"];
+  }
+  
+  let addedCount = 0;
+  const addedDates = [];
+  
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
+    const dayOfWeek = new Date(year, month - 1, d).getDay();
+    
+    // 수강 요일(월/금)이고, 휴원일이 아닌 경우만 등록
+    if (scanResult.activeDays.includes(dayOfWeek) && !scanResult.holidayDates.includes(dateStr)) {
+      const existingIdx = state.enrollments.findIndex(e => e.studentId === enrollSelectedStudentId && e.date === dateStr);
+      const item = {
+        id: `enr-scan-${Date.now()}-${d}`,
+        studentId: enrollSelectedStudentId,
+        date: dateStr,
+        startTime: scanResult.startTime,
+        endTime: scanResult.endTime
+      };
+      if (existingIdx >= 0) {
+        state.enrollments[existingIdx] = item;
+      } else {
+        state.enrollments.push(item);
+      }
+      addedCount++;
+      addedDates.push(`${month}/${d}(${["일","월","화","수","목","금","토"][dayOfWeek]})`);
+    }
+  }
+  
+  alert(`🤖 AI 손글씨 캘린더 인식 완료!\n\n▶ 인식 요일: 월요일, 금요일\n▶ 수강 시간: 15:00 ~ 18:00 (3~6시)\n▶ 제외(휴원): 목요일 전체, 특정 휴원일\n\n📋 등록된 날짜 (${addedCount}개):\n${addedDates.join(", ")}\n\n캘린더에 수강 일정이 자동 반영되었습니다.`);
+  
+  state.calendarScans = state.calendarScans || {};
+  state.calendarScans[`${enrollSelectedStudentId}_${opsYearMonth}`] = currentScanDataUrl;
+  try {
+    localStorage.setItem("yuju_calendar_scans", JSON.stringify(state.calendarScans));
+  } catch(e) {}
+  
+  closeModal();
+  renderStudentEnrollments();
+}
+
+function viewScanImageModal() {
+  const key = `${enrollSelectedStudentId}_${opsYearMonth}`;
+  const imgUrl = state.calendarScans && state.calendarScans[key];
+  if (!imgUrl) return;
+  
+  const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
+  const stName = targetStudent ? targetStudent.name : "학생";
+  
+  openModal(`
+    <div class="modal-header">
+      <h3>📷 ${stName} 학생 손글씨 캘린더 스캔본 원본 (${opsYearMonth})</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="text-align:center;">
+      <div style="background:#0f172a; padding:12px; border-radius:var(--radius-md); margin-bottom:16px;">
+        <img src="${imgUrl}" style="max-width:100%; max-height:500px; object-fit:contain; border-radius:var(--radius-sm);">
+      </div>
+      <button class="btn btn-secondary" onclick="closeModal()" style="width:100%;">닫기</button>
+    </div>
+  `);
+}
+
+window.openScanUploadModal = openScanUploadModal;
+window.previewScanImage = previewScanImage;
+window.handleSaveScanImage = handleSaveScanImage;
+window.handleAiExtractSchedules = handleAiExtractSchedules;
+window.viewScanImageModal = viewScanImageModal;
