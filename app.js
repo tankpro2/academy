@@ -17,6 +17,7 @@ let state = {
   attendance: [],             // 출결 기록 목록
   dailyPlans: [],             // 당일 진도 계획/실적 목록
   notices: [],                // 공지사항 목록
+  consultations: [],          // 상담 신청 내역 목록
   monthlyOperations: {},      // 월별 학원 가동 정보 (키: 'YYYY-MM', 값: { 'YYYY-MM-DD': { isHoliday, isClosed, start, end } })
   
   // 시뮬레이션 기준 날짜
@@ -34,6 +35,7 @@ function loadOfflineMockData() {
     state.attendance = (window.mockData.attendance || []).map(r => r.data || r);
     state.dailyPlans = (window.mockData.dailyPlans || []).map(r => r.data || r);
     state.notices = (window.mockData.notices || []).map(r => r.data || r);
+    state.consultations = (window.mockData.consultations || []).map(r => r.data || r);
     state.monthlyOperations = {};
     if (window.mockData.monthlyOperations) {
       window.mockData.monthlyOperations.forEach(r => {
@@ -213,6 +215,7 @@ async function loadAllData() {
       resAttendance,
       resDailyPlans,
       resNotices,
+      resConsultations,
       resOperations
     ] = await Promise.all([
       supabaseClient.from("agy_students").select("*"),
@@ -223,6 +226,7 @@ async function loadAllData() {
       supabaseClient.from("agy_attendance").select("*"),
       supabaseClient.from("agy_daily_plans").select("*"),
       supabaseClient.from("agy_notices").select("*"),
+      supabaseClient.from("agy_consultations").select("*"),
       supabaseClient.from("agy_monthly_operations").select("*")
     ]);
     
@@ -234,6 +238,7 @@ async function loadAllData() {
     state.attendance = (resAttendance.data || []).map(r => r.data);
     state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
     state.notices = (resNotices.data || []).map(r => r.data);
+    state.consultations = (resConsultations.data || []).map(r => r.data);
     
     state.monthlyOperations = {};
     (resOperations.data || []).forEach(r => {
@@ -449,9 +454,10 @@ function renderSidebarMenu() {
   const allMenus = [
     { key: "dashboard", label: "대시보드", icon: "layout-dashboard", roles: ["director", "teacher", "assistant", "student"] },
     { key: "operations", label: "운영 관리", icon: "calendar-range", roles: ["director"] },
+    { key: "consultations", label: "상담 신청 내역", icon: "message-square", roles: ["director"] },
     { key: "students", label: "학생 관리", icon: "users", roles: ["director", "teacher", "assistant"] },
     { key: "teachers", label: "강사 관리", icon: "graduation-cap", roles: ["director", "teacher"] },
-    { key: "enrollments", label: "수강 관리(시간표)", icon: "calendar-days", roles: ["director", "teacher", "assistant", "student"] },
+    { key: "enrollments", label: "수강 관리(시간표)", icon: "calendar-days", roles: ["director", "teacher", "assistant"] },
     { key: "studentEnrollments", label: "학생별 시간표", icon: "user-check", roles: ["director", "teacher", "assistant", "student"] },
     { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant", "student"] }
   ];
@@ -486,6 +492,9 @@ function navigate(viewKey) {
       break;
     case "operations":
       renderOperations();
+      break;
+    case "consultations":
+      renderConsultations();
       break;
     case "students":
       renderStudents();
@@ -1036,7 +1045,10 @@ function renderStudents() {
   
   let headerAction = "";
   if (studentTab === "list" && (state.currentUser.role === 'director' || state.currentUser.role === 'assistant')) {
-    headerAction = `<button class="btn btn-emerald" onclick="openNewStudentModal()"><i data-lucide="user-plus"></i> 신규 학생 등록</button>`;
+    headerAction = `
+      <button class="btn btn-danger" onclick="deleteSelectedStudents()"><i data-lucide="trash-2"></i> 선택 삭제</button>
+      <button class="btn btn-emerald" onclick="openNewStudentModal()"><i data-lucide="user-plus"></i> 신규 학생 등록</button>
+    `;
   }
 
   container.innerHTML = `
@@ -1072,6 +1084,45 @@ function toggleStudentTab(tab) {
   renderStudents();
 }
 
+function selectAllStudents(chk) {
+  const checkboxes = document.querySelectorAll('.student-chk');
+  checkboxes.forEach(cb => cb.checked = chk.checked);
+}
+
+async function deleteSelectedStudents() {
+  const checkboxes = document.querySelectorAll('.student-chk:checked');
+  if (checkboxes.length === 0) {
+    alert("삭제할 학생을 선택해 주세요.");
+    return;
+  }
+  
+  if (!confirm("선택한 학생을 정말 삭제하시겠습니까?\\n(해당 학생의 정보 및 로그인 계정이 모두 삭제됩니다)")) return;
+
+  const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
+  
+  // 상태 업데이트
+  state.students = state.students.filter(s => !idsToDelete.includes(s.id));
+  
+  // Supabase 삭제
+  if (supabaseClient) {
+    try {
+      // 1. agy_students에서 삭제
+      const deletePromises = idsToDelete.map(id => supabaseClient.from("agy_students").delete().eq("id", id));
+      await Promise.all(deletePromises);
+      
+      // 2. agy_users에서도 삭제 (학생의 ref_id와 일치하는 유저)
+      const userDeletePromises = idsToDelete.map(id => supabaseClient.from("agy_users").delete().eq("ref_id", id));
+      await Promise.all(userDeletePromises);
+      
+    } catch (e) {
+      console.error("학생 삭제 실패:", e);
+    }
+  }
+  
+  alert("선택한 학생이 성공적으로 삭제되었습니다.");
+  renderStudentList();
+}
+
 // 등록관리 리스트
 function renderStudentList() {
   const target = document.getElementById("studentTabContent");
@@ -1089,6 +1140,7 @@ function renderStudentList() {
     
     return `
       <tr>
+        <td style="text-align: center;"><input type="checkbox" class="student-chk" value="${s.id}" style="cursor:pointer; width:16px; height:16px; accent-color:var(--primary-color);"></td>
         <td class="${highlightClass}">${escapeHTML(s.name)}</td>
         <td>${escapeHTML(s.school)} (학년: ${s.grade})</td>
         <td>${escapeHTML(s.gender)}</td>
@@ -1113,7 +1165,7 @@ function renderStudentList() {
   }).join("");
   
   if (tableRows === "") {
-    tableRows = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">표시할 학생 정보가 없습니다.</td></tr>`;
+    tableRows = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted);">표시할 학생 정보가 없습니다.</td></tr>`;
   }
 
   target.innerHTML = `
@@ -1123,6 +1175,7 @@ function renderStudentList() {
         <table class="yuju-table">
           <thead>
             <tr>
+              <th style="width: 40px; text-align: center;"><input type="checkbox" onclick="selectAllStudents(this)" style="cursor:pointer; width:16px; height:16px; accent-color:var(--primary-color);"></th>
               <th>이름</th>
               <th>학교/학년</th>
               <th>성별</th>
@@ -2388,7 +2441,7 @@ function renderStudentEnrollments() {
         </div>
       `;
       cellCursor = "cursor:not-allowed;";
-      cellOnClick = `onclick="event.stopPropagation(); alert('\ud559\uc6d0 \ud734\uc6d0\uc77c\uc785\ub2c8\ub2e4.\n\uc218\uac15 \uc2e0\uccad\uc744 \ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.');"` ;
+      cellOnClick = `onclick="event.stopPropagation(); showHolidayAlert();"` ;
     } else if (enrs.length > 0) {
       cellStyle = "background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-color: #10b981;";
       const badgesHTML = enrs.map(enr => `
@@ -3383,6 +3436,12 @@ function renderProgress() {
           onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 8px 28px rgba(197,155,39,0.55)';">
           ✏️ 계획수립 시작
         </button>
+
+        <!-- ④ 감사 문구 -->
+        <div style="position: absolute; right: 20px; bottom: 16px;
+          font-size: 11px; color: rgba(255,255,255,0.45); font-style: italic; letter-spacing: 0.3px;">
+          도움 주신 beeper9에게 감사드립니다
+        </div>
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
@@ -3494,9 +3553,9 @@ function renderProgressTabContent(studentId) {
         return `
           <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
             <span style="font-weight:700; width:30px;">#${idx + 1}</span>
-            <input type="text" id="actName_${idx}" value="${escapeHTML(defaultPlan.activityName)}" placeholder="활동/과제명 입력" style="flex:2; padding:8px;">
-            <input type="time" id="actStart_${idx}" value="${defaultPlan.start}" style="flex:1; padding:8px;">
-            <input type="time" id="actEnd_${idx}" value="${defaultPlan.end}" style="flex:1; padding:8px;">
+            <input type="text" id="actName_${idx}" value="${escapeHTML(defaultPlan.activityName)}" placeholder="활동/과제명 입력" style="flex:2; padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+            ${makeTimeSelectHTML('actStart_' + idx, defaultPlan.start, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
+            ${makeTimeSelectHTML('actEnd_' + idx, defaultPlan.end, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
           </div>
         `;
       }).join("");
@@ -3547,13 +3606,13 @@ function renderProgressTabContent(studentId) {
           </div>
           
           <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
-            <div class="form-group" style="margin-bottom:0; width:120px;">
-              <label style="font-size:11px;">실제 시작시간</label>
-              <input type="time" id="realStart_${p.id}" value="${actualIn}" ${p.isConfirmed ? 'disabled' : ''} style="padding:6px; width:100%;">
+            <div class="form-group" style="margin-bottom:0; width:140px;">
+              <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 시작시간</label>
+              ${makeTimeSelectHTML('realStart_' + p.id, actualIn, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;' + (p.isConfirmed ? ' pointer-events:none; opacity:0.6;' : ''))}
             </div>
-            <div class="form-group" style="margin-bottom:0; width:120px;">
-              <label style="font-size:11px;">실제 완료시간</label>
-              <input type="time" id="realEnd_${p.id}" value="${actualOut}" ${p.isConfirmed ? 'disabled' : ''} style="padding:6px; width:100%;">
+            <div class="form-group" style="margin-bottom:0; width:140px;">
+              <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 완료시간</label>
+              ${makeTimeSelectHTML('realEnd_' + p.id, actualOut, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;' + (p.isConfirmed ? ' pointer-events:none; opacity:0.6;' : ''))}
             </div>
             
             <div style="margin-left:12px; display:flex; align-items:center; gap:6px;">
@@ -3585,6 +3644,83 @@ function renderProgressTabContent(studentId) {
   }
 }
 
+// 11. 상담 신청 내역 관리
+function renderConsultations() {
+  const container = document.getElementById("mainContent");
+  if (!state.consultations) state.consultations = [];
+  
+  let listHTML = "";
+  if (state.consultations.length === 0) {
+    listHTML = `<div style="text-align:center; padding: 40px; color: var(--text-muted);">현재 접수된 상담 신청 내역이 없습니다.</div>`;
+  } else {
+    listHTML = state.consultations.map(cs => {
+      const isCompleted = cs.status === "상담완료";
+      const statusBadge = isCompleted 
+        ? `<span class="badge" style="background:#d1fae5; color:#065f46;">상담완료</span>`
+        : `<span class="badge" style="background:#fee2e2; color:#b91c1c;">대기중</span>`;
+      
+      const dateStr = new Date(cs.createdAt).toLocaleString('ko-KR');
+      
+      return `
+        <div class="card" style="margin-bottom: 12px; border-left: 4px solid ${isCompleted ? '#10b981' : '#ef4444'};">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px;">
+            <div style="display:flex; align-items:center; gap: 8px;">
+              <h3 style="margin:0; font-size: 16px;">${cs.name} 학생 <span style="font-size:13px; font-weight:400; color:var(--text-muted);">(${cs.grade})</span></h3>
+              ${statusBadge}
+              <span class="badge badge-emerald">${cs.field}</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-muted);">${dateStr}</div>
+          </div>
+          
+          <div style="display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--text-dark); margin-bottom: 12px;">
+            <div><strong>연락처:</strong> ${cs.phone}</div>
+            ${cs.memo ? `<div style="background:var(--bg-app); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-color);"><strong>[문의/참고사항]</strong><br>${cs.memo.replace(/\\n/g, '<br>')}</div>` : ''}
+          </div>
+          
+          <div style="display:flex; justify-content:flex-end;">
+            <button class="btn btn-secondary" style="padding: 6px 12px; font-size:12px;" onclick="handleConsultStatusChange('${cs.id}')">
+              ${isCompleted ? '대기중으로 변경' : '상담완료 처리'}
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>상담 관리</h1>
+        <p>외부 홈페이지에서 접수된 상담 신청 내역을 관리합니다.</p>
+      </div>
+    </div>
+    
+    <div class="cards-grid" style="grid-template-columns: 1fr;">
+      ${listHTML}
+    </div>
+  `;
+  
+  if (window.lucide) window.lucide.createIcons();
+}
+
+async function handleConsultStatusChange(id) {
+  const cs = state.consultations.find(c => c.id === id);
+  if (!cs) return;
+  
+  cs.status = cs.status === "상담완료" ? "대기중" : "상담완료";
+  
+  // DB 업데이트
+  if (window.supabaseClient) {
+    try {
+      await window.supabaseClient.from("agy_consultations").update({ data: cs }).eq("id", id);
+    } catch (e) {
+      console.error("상담 상태 업데이트 실패:", e);
+    }
+  }
+  
+  renderConsultations();
+}
+
 // 밍크고래 계획 모드 시작 헬퍼
 function startDailyPlanMode(studentId) {
   state.hasEnteredPlanMode = true;
@@ -3610,9 +3746,9 @@ function addPlanRow(studentId) {
   
   newRow.innerHTML = `
     <span style="font-weight:700; width:30px;">#${currentCount + 1}</span>
-    <input type="text" id="actName_${currentCount}" placeholder="활동/과제명 입력" style="flex:2; padding:8px;">
-    <input type="time" id="actStart_${currentCount}" value="14:00" style="flex:1; padding:8px;">
-    <input type="time" id="actEnd_${currentCount}" value="15:00" style="flex:1; padding:8px;">
+    <input type="text" id="actName_${currentCount}" placeholder="활동/과제명 입력" style="flex:2; padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+    ${makeTimeSelectHTML('actStart_' + currentCount, '14:00', 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
+    ${makeTimeSelectHTML('actEnd_' + currentCount, '15:00', 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
   `;
   
   container.appendChild(newRow);
@@ -3849,6 +3985,7 @@ function renderHomepage() {
   const container = document.getElementById("mainContent");
   container.innerHTML = getHomepageHTML(false);
   if (window.lucide) window.lucide.createIcons();
+  bindConsultButtons(container);
 }
 
 function openPublicHomepage() {
@@ -3857,7 +3994,19 @@ function openPublicHomepage() {
   screen.style.display = "block";
   screen.innerHTML = getHomepageHTML(true);
   if (window.lucide) window.lucide.createIcons();
+  bindConsultButtons(screen);
 }
+
+// .consult-btn[data-field] 버튼에 클릭 이벤트 연결
+function bindConsultButtons(root) {
+  const btns = (root || document).querySelectorAll('.consult-btn[data-field]');
+  btns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      openConsultationModal(btn.getAttribute('data-field'));
+    });
+  });
+}
+window.bindConsultButtons = bindConsultButtons;
 
 function closePublicHomepage() {
   document.getElementById("publicHomepageScreen").style.display = "none";
@@ -3880,13 +4029,15 @@ function handleHomepageContact(event) {
 }
 
 function openConsultationModal(field) {
-  openModal(`
+  const title = (field === '국어/독서코칭') ? '대치리드인 국어 독서코칭' : '유주코칭 진로진학컨설팅';
+  const content = document.createElement('div');
+  content.innerHTML = `
     <div class="modal-header">
-      <h3>${field === '국어/독서코칭' ? '대치리드인 국어 독서코칭' : '유주코칭 진로진학컨설팅'} 상담 신청</h3>
+      <h3>${title} 상담 신청</h3>
       <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
     <div class="modal-body">
-      <form onsubmit="handleHomepageContactModal(event, '${field}')" style="display: flex; flex-direction: column; gap: 14px;">
+      <form id="consultationForm" style="display: flex; flex-direction: column; gap: 14px;">
         <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
           <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학생 이름</label>
           <input type="text" id="modalContactName" placeholder="학생 이름을 입력하세요" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
@@ -3903,19 +4054,31 @@ function openConsultationModal(field) {
           <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">문의 및 참고사항</label>
           <textarea id="modalContactMemo" placeholder="원장님께 전달할 특별한 내용(예: 독서 수준, 학습 성향 등)을 적어주세요." style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 80px; resize: none;"></textarea>
         </div>
-        <button type="submit" class="btn btn-emerald" style="width: 100%; padding: 12px; font-weight: 600; border:none; border-radius:var(--radius-sm); cursor:pointer; background-color: var(--primary-color); color:white; margin-top:10px;">상담 신청 완료하기</button>
+        <button type="button" id="consultSubmitBtn" class="btn btn-emerald" style="width: 100%; padding: 12px; font-weight: 600; border:none; border-radius:var(--radius-sm); cursor:pointer; background-color: var(--primary-color); color:white; margin-top:10px;">상담 신청 완료하기</button>
       </form>
     </div>
-  `);
+  `;
+  const overlay = document.getElementById('globalModal');
+  const modalContent = document.getElementById('modalContent');
+  modalContent.innerHTML = '';
+  modalContent.appendChild(content);
+  overlay.style.display = 'flex';
+  if (window.lucide) window.lucide.createIcons();
+
+  document.getElementById('consultSubmitBtn').addEventListener('click', function() {
+    handleHomepageContactModal(field);
+  });
 }
 
-function handleHomepageContactModal(event, field) {
-  event.preventDefault();
-  const name = document.getElementById("modalContactName").value;
-  const phone = document.getElementById("modalContactPhone").value;
-  const grade = document.getElementById("modalContactGrade").value;
-  
-  alert(`${name} 학생(${grade})의 [${field}] 상담 신청이 성공적으로 접수되었습니다!\n원장님이 확인 후 기재해주신 연락처(${phone})로 직접 전화 드리겠습니다. 감사합니다.`);
+function handleHomepageContactModal(field) {
+  const name = document.getElementById('modalContactName').value.trim();
+  const phone = document.getElementById('modalContactPhone').value.trim();
+  const grade = document.getElementById('modalContactGrade').value.trim();
+  if (!name || !phone || !grade) {
+    alert('학생 이름, 연락처, 학교 및 학년을 모두 입력해 주세요.');
+    return;
+  }
+  alert(name + ' 학생(' + grade + ')의 [' + field + '] 상담 신청이 성공적으로 접수되었습니다!\n원장님이 확인 후 기재해주신 연락처(' + phone + ')로 직접 전화 드리겠습니다. 감사합니다.');
   closeModal();
 }
 
@@ -3925,14 +4088,9 @@ function getHomepageHTML(isPublic) {
       <nav class="homepage-nav" style="display:flex; justify-content:space-between; align-items:center; padding: 12px 28px; background: white; border-bottom: 1px solid var(--border-color); position:sticky; top:0; z-index:1000;">
         <div class="logo-area" style="display:flex; align-items:center; gap:8px; font-family: var(--font-title); font-weight:800; font-size:22px; color: var(--primary-color);">
           <i data-lucide="graduation-cap" style="width:28px; height:28px;"></i>
-          <span style="font-weight:900;">EduCare 상아탑</span>
+          <span style="font-weight:900; font-size: 20px;">대치리드인 유주코칭 국어학원</span>
         </div>
-        <div class="nav-links" style="display:flex; gap:30px; font-weight:700; font-size:15px;">
-          <a href="#about" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--text-muted)'">학원 소개</a>
-          <a href="#programs" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--text-muted)'">대표 프로그램</a>
-          <a href="#blog" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--text-muted)'">교육 블로그</a>
-          <a href="#contact" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;" onmouseover="this.style.color='var(--primary-color)'" onmouseout="this.style.color='var(--text-muted)'">상담 예약</a>
-        </div>
+
         <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:700; background-color: var(--text-dark); color: white; border:none; padding:10px 20px; border-radius:30px; cursor:pointer;">
           <i data-lucide="lock" style="width:16px; height:16px;"></i> 학원관리 시스템 로그인
         </button>
@@ -3953,9 +4111,6 @@ function getHomepageHTML(isPublic) {
             단순 주입식 교육을 넘어 학생의 문해력을 과학적으로 트레이닝하고,<br>수시 학생부 관리와 심층 상담을 통해 최적의 합격 전략을 설계합니다.
           </p>
           <div style="display:flex; gap:10px; margin-top:14px;">
-            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="background-color: var(--accent-gold); color: var(--text-dark); font-weight:800; border-radius:30px; padding:9px 18px; font-size:13px; box-shadow: 0 4px 12px rgba(197, 155, 39, 0.3);">
-              무료 상담 신청하기
-            </button>
             <button class="btn btn-secondary" onclick="document.getElementById('programs').scrollIntoView({behavior: 'smooth'})" style="background: transparent; color: white; border: 1px solid white; border-radius:30px; padding:9px 18px; font-size:13px;">
               프로그램 둘러보기
             </button>
@@ -3980,7 +4135,10 @@ function getHomepageHTML(isPublic) {
         <div class="homepage-card compact-bottom left-card" style="background:white; padding:20px 24px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
           <div>
             <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">대치리드인 국어학원</h2>
+              <div style="display:flex; align-items:center; gap: 8px;">
+                <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">대치리드인 국어학원</h2>
+                <a href="https://blog.naver.com/tankpro11" target="_blank" class="btn btn-secondary" style="padding: 4px 10px; font-size:12px; border-radius:15px; text-decoration:none; display:flex; align-items:center;"><i data-lucide="external-link" style="width:12px; height:12px; margin-right:4px;"></i>블로그 바로가기</a>
+              </div>
               <span class="badge badge-emerald">독해 및 국어 전문</span>
             </div>
             <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
@@ -3992,7 +4150,7 @@ function getHomepageHTML(isPublic) {
             </ul>
           </div>
           <div>
-            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button class="btn btn-emerald consult-btn" data-field="국어/독서코칭" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
               <i data-lucide="calendar"></i> 대치리드인 상담 신청하기
             </button>
             <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
@@ -4005,7 +4163,10 @@ function getHomepageHTML(isPublic) {
         <div class="homepage-card compact-bottom right-card" style="background:white; padding:20px 24px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
           <div>
             <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">유주코칭 진학상담소</h2>
+              <div style="display:flex; align-items:center; gap: 8px;">
+                <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">유주코칭 진학상담소</h2>
+                <a href="https://blog.naver.com/ujucoach" target="_blank" class="btn btn-secondary" style="padding: 4px 10px; font-size:12px; border-radius:15px; text-decoration:none; display:flex; align-items:center;"><i data-lucide="external-link" style="width:12px; height:12px; margin-right:4px;"></i>블로그 바로가기</a>
+              </div>
               <span class="badge" style="background:var(--accent-gold-light); color:var(--accent-gold);">진로 및 진학 컨설팅</span>
             </div>
             <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
@@ -4017,7 +4178,7 @@ function getHomepageHTML(isPublic) {
             </ul>
           </div>
           <div>
-            <button class="btn btn-emerald" onclick="openConsultationModal('진로진학컨설팅')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--accent-gold); color: var(--text-dark); display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button class="btn btn-emerald consult-btn" data-field="진로진학컨설팅" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--accent-gold); color: var(--text-dark); display: flex; align-items: center; justify-content: center; gap: 8px;">
               <i data-lucide="calendar"></i> 유주코칭 상담 신청하기
             </button>
             <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
@@ -4038,6 +4199,28 @@ window.handleHomepageContact = handleHomepageContact;
 window.openConsultationModal = openConsultationModal;
 window.handleHomepageContactModal = handleHomepageContactModal;
 window.renderStudentEnrollments = renderStudentEnrollments;
+
+// 휴원일 알림 (인라인 onclick에서 한글 처리 오류 방지용 전역 함수)
+function showHolidayAlert() {
+  alert('학원 휴원일입니다.\n수강 신청을 할 수 없습니다.');
+}
+window.showHolidayAlert = showHolidayAlert;
+
+// 시간 선택 드롭다운 HTML 생성 헬퍼 (5분 단위, 13:00 ~ 22:30)
+function makeTimeSelectHTML(id, defaultVal, style) {
+  const options = [];
+  for (let h = 9; h <= 23; h++) {
+    for (let m = 0; m < 60; m += 5) {
+      const hh = String(h).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      const val = `${hh}:${mm}`;
+      const sel = val === defaultVal ? 'selected' : '';
+      options.push(`<option value="${val}" ${sel}>${val}</option>`);
+    }
+  }
+  return `<select id="${id}" style="${style || 'flex:1; padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px;'}">${options.join('')}</select>`;
+}
+window.makeTimeSelectHTML = makeTimeSelectHTML;
 
 // --- 원장님 생신 축하 이쁜 팝업 모달 ---
 function showBirthdayPopup() {
@@ -4180,7 +4363,7 @@ function handleSaveScanImage() {
   renderStudentEnrollments();
 }
 
-function handleAiExtractSchedules() {
+async function handleAiExtractSchedules() {
   if (!currentScanDataUrl) {
     alert("먼저 손글씨 캘린더 이미지 파일을 첨부해 주세요.");
     return;
@@ -4199,8 +4382,8 @@ function handleAiExtractSchedules() {
   // 휴원 표시된 특정 날짜들 제외 (이미지에서 빨간 (휴원) 표시)
   const scanResult = {
     activeDays: [1, 5],   // 0=일, 1=월, 2=화, 3=수, 4=목, 5=금, 6=토
-    startTime: "15:00",
-    endTime: "18:00",
+    startTime: "14:00",
+    endTime: "16:00",
     // 이미지에서 (휴원) 표시된 날짜들 (월/일 형식 → opsYearMonth 기준으로 변환)
     holidayDates: []
   };
@@ -4238,7 +4421,17 @@ function handleAiExtractSchedules() {
     }
   }
   
-  alert(`🤖 AI 손글씨 캘린더 인식 완료!\n\n▶ 인식 요일: 월요일, 금요일\n▶ 수강 시간: 15:00 ~ 18:00 (3~6시)\n▶ 제외(휴원): 목요일 전체, 특정 휴원일\n\n📋 등록된 날짜 (${addedCount}개):\n${addedDates.join(", ")}\n\n캘린더에 수강 일정이 자동 반영되었습니다.`);
+  if (supabaseClient && addedCount > 0) {
+    try {
+      const targetItems = state.enrollments.filter(e => e.studentId === enrollSelectedStudentId && e.id.startsWith('enr-scan-'));
+      const upsertPromises = targetItems.map(item => supabaseClient.from("agy_enrollments").upsert([{ id: item.id, data: item }]));
+      await Promise.all(upsertPromises);
+    } catch (e) {
+      console.error("AI 스캔 일정 DB 저장 실패:", e);
+    }
+  }
+  
+  alert(`🤖 AI 손글씨 캘린더 인식 완료!\n\n▶ 인식 요일: 월요일, 금요일\n▶ 수강 시간: 14:00 ~ 16:00 (2~4시)\n▶ 제외(휴원): 목요일 전체, 특정 휴원일\n\n📋 등록된 날짜 (${addedCount}개):\n${addedDates.join(", ")}\n\n캘린더에 수강 일정이 자동 반영되었습니다.`);
   
   state.calendarScans = state.calendarScans || {};
   state.calendarScans[`${enrollSelectedStudentId}_${opsYearMonth}`] = currentScanDataUrl;
@@ -4277,3 +4470,6 @@ window.previewScanImage = previewScanImage;
 window.handleSaveScanImage = handleSaveScanImage;
 window.handleAiExtractSchedules = handleAiExtractSchedules;
 window.viewScanImageModal = viewScanImageModal;
+window.handleConsultStatusChange = handleConsultStatusChange;
+window.selectAllStudents = selectAllStudents;
+window.deleteSelectedStudents = deleteSelectedStudents;

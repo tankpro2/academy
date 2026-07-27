@@ -147,14 +147,9 @@
     <nav class="homepage-nav" style="display:flex; justify-content:space-between; align-items:center; padding: 12px 28px; background: white; border-bottom: 1px solid var(--border-color); position:sticky; top:0; z-index:1000;">
       <div class="logo-area" style="display:flex; align-items:center; gap:8px; font-family: var(--font-title); font-weight:800; font-size:22px; color: var(--primary-color);">
         <i data-lucide="graduation-cap" style="width:28px; height:28px;"></i>
-        <span style="font-weight:900;">EduCare 상아탑</span>
+        <span style="font-weight:900; font-size: 20px;">대치리드인 유주코칭 국어학원</span>
       </div>
-      <div class="nav-links" style="display:flex; gap:30px; font-weight:700; font-size:15px;">
-        <a href="#about" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;">학원 소개</a>
-        <a href="#programs" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;">대표 프로그램</a>
-        <a href="#blog" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;">교육 블로그</a>
-        <a href="#contact" style="text-decoration:none; color:var(--text-muted); transition:color 0.2s;">상담 예약</a>
-      </div>
+
       <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:700; background-color: var(--text-dark); color: white; border:none; padding:10px 20px; border-radius:30px; cursor:pointer;">
         <i data-lucide="lock" style="width:16px; height:16px;"></i> 학원관리 시스템 로그인
       </button>
@@ -174,9 +169,6 @@
             단순 주입식 교육을 넘어 학생의 문해력을 과학적으로 트레이닝하고,<br>수시 학생부 관리와 심층 상담을 통해 최적의 합격 전략을 설계합니다.
           </p>
           <div style="display:flex; gap:10px; margin-top:14px;">
-            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="background-color: var(--accent-gold); color: var(--text-dark); font-weight:800; border-radius:30px; padding:9px 18px; font-size:13px; box-shadow: 0 4px 12px rgba(197, 155, 39, 0.3);">
-              무료 상담 신청하기
-            </button>
             <button class="btn btn-secondary" onclick="document.getElementById('programs').scrollIntoView({behavior: 'smooth'})" style="background: transparent; color: white; border: 1px solid white; border-radius:30px; padding:9px 18px; font-size:13px;">
               프로그램 둘러보기
             </button>
@@ -201,7 +193,10 @@
         <div class="homepage-card compact-bottom left-card" style="background:white; padding:20px 24px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
           <div>
             <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">대치리드인 국어학원</h2>
+              <div style="display:flex; align-items:center; gap: 8px;">
+                <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">대치리드인 국어학원</h2>
+                <a href="https://blog.naver.com/tankpro11" target="_blank" class="btn btn-secondary" style="padding: 4px 10px; font-size:12px; border-radius:15px; text-decoration:none; display:flex; align-items:center;"><i data-lucide="external-link" style="width:12px; height:12px; margin-right:4px;"></i>블로그 바로가기</a>
+              </div>
               <span class="badge badge-emerald">독해 및 국어 전문</span>
             </div>
             <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
@@ -213,7 +208,7 @@
             </ul>
           </div>
           <div>
-            <button class="btn btn-emerald" onclick="openConsultationModal('국어/독서코칭')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button class="btn btn-emerald consult-btn" data-field="국어/독서코칭" onclick="openConsultationModal('국어/독서코칭')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
               <i data-lucide="calendar"></i> 대치리드인 상담 신청하기
             </button>
             <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
@@ -226,7 +221,10 @@
         <div class="homepage-card compact-bottom right-card" style="background:white; padding:20px 24px; border-radius:var(--radius-lg); border:1px solid var(--border-color); display:flex; flex-direction:column; justify-content:space-between; box-shadow:var(--shadow-md);">
           <div>
             <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
-              <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">유주코칭 진학상담소</h2>
+              <div style="display:flex; align-items:center; gap: 8px;">
+                <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">유주코칭 진학상담소</h2>
+                <a href="https://blog.naver.com/ujucoach" target="_blank" class="btn btn-secondary" style="padding: 4px 10px; font-size:12px; border-radius:15px; text-decoration:none; display:flex; align-items:center;"><i data-lucide="external-link" style="width:12px; height:12px; margin-right:4px;"></i>블로그 바로가기</a>
+              </div>
               <span class="badge" style="background:var(--accent-gold-light); color:var(--accent-gold);">진로 및 진학 컨설팅</span>
             </div>
             <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
@@ -238,7 +236,7 @@
             </ul>
           </div>
           <div>
-            <button class="btn btn-emerald" onclick="openConsultationModal('진로진학컨설팅')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--accent-gold); color: var(--text-dark); display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button class="btn btn-emerald consult-btn" data-field="진로진학컨설팅" onclick="openConsultationModal('진로진학컨설팅')" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; background-color: var(--accent-gold); color: var(--text-dark); display: flex; align-items: center; justify-content: center; gap: 8px;">
               <i data-lucide="calendar"></i> 유주코칭 상담 신청하기
             </button>
             <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
@@ -292,7 +290,19 @@
   <div id="debugConsoleLogs" style="display: none;"></div>
 
   <!-- 비즈니스 로직 스크립트 로드 -->
-  <script src="mockData.js?v=25"></script>
-  <script src="app.js?v=25"></script>
+  <script src="mockData.js?v=26"></script>
+  <script src="app.js?v=26"></script>
+  <script>
+    // 정적 홈페이지의 .consult-btn 버튼에 클릭 이벤트 연결 (스크립트 로드 완료 후)
+    window.addEventListener('load', function() {
+      document.querySelectorAll('.consult-btn[data-field]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          if (window.openConsultationModal) {
+            window.openConsultationModal(btn.getAttribute('data-field'));
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>
