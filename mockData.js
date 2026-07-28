@@ -89,6 +89,36 @@ window.mockData = {
     { id: "sch-13", teacherId: "tc-10", dayOfWeek: "목", startTime: "14:00", endTime: "20:00" }
   ],
 
+  // 4-2. 상담 신청 기본 샘플 데이터
+  consultations: [
+    {
+      id: "cs-101",
+      name: "김민준",
+      studentName: "김민준",
+      field: "유주코칭 진학상담소",
+      type: "유주코칭 진학상담소",
+      grade: "고3",
+      phone: "010-1234-5000",
+      createdAt: "2026-07-28T14:30:00.000Z",
+      requestDate: "2026-07-28",
+      status: "대기중",
+      memo: "2027학년도 대입 수시 학생부 종합 전형 진학 상담 희망합니다."
+    },
+    {
+      id: "cs-102",
+      name: "이서윤",
+      studentName: "이서윤",
+      field: "대치리드인 국어학원",
+      type: "대치리드인 국어학원",
+      grade: "중2",
+      phone: "010-5678-6001",
+      createdAt: "2026-07-27T11:20:00.000Z",
+      requestDate: "2026-07-27",
+      status: "대기중",
+      memo: "독서 논술 레벨 진단 및 비문학 독해 집중반 수강 상담 요청합니다."
+    }
+  ],
+
   // 5. 공지사항 데이터 (20건)
   notices: [
     { id: "nt-1", title: "2026년 여름방학 특강 안내", content: "여름방학을 맞이하여 비문학 독해 집중 4주 완성 특강을 개설합니다. 수강 신청 탭을 통해 일정을 예약해 주세요.", date: "2026-07-15", author: "원장 김유주" },

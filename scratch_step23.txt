@@ -1,0 +1,514 @@
+﻿Created At: 2026-07-27T20:39:35+09:00
+Completed At: 2026-07-27T20:39:35+09:00
+File Path: `file:///c:/academy/app.js`
+Total Lines: 4280
+Total Bytes: 191378
+Showing lines 3316 to 3820
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+3316: // --- ⑥ 진도 관리 뷰 ---
+3317: let progressTab = "plan"; // plan: 당일계획수립, result: 당일실적등록, stats: 진도이력조회
+3318: 
+3319: // 학생 계획수립 모드 진입 처리 (대기화면 → 실제 계획 입력화면)
+3320: function enterStudentPlanMode() {
+3321:   state.hasEnteredPlanMode = true;
+3322:   renderProgress();
+3323: }
+3324: window.enterStudentPlanMode = enterStudentPlanMode;
+3325: 
+3326: function renderProgress() {
+3327:   const container = document.getElementById("mainContent");
+3328:   
+3329:   // 로그인 학생인 경우 타겟 자동 고정
+3330:   let progressStudentId = "";
+3331:   if (state.currentUser.role === 'student') {
+3332:     progressStudentId = state.currentUser.ref_id;
+3333:   } else if (state.students.length > 0) {
+3334:     progressStudentId = state.students[0].id;
+3335:   }
+3336: 
+3337:   // 진도관리 대기화면 조건 확인 (학생 계정일 때만 첫 진입 시 표출)
+3338:   const isStudent = state.currentUser && state.currentUser.role === 'student';
+3339:   if (isStudent && !state.hasEnteredPlanMode) {
+3340:     const quotes = window.mockData.quotes || [
+3341:       "배움의 깊이를 더하는 상아탑에서의 하루가 미래를 바꿉니다.",
+3342:       "독서는 정신의 음악이다. - 소크라테스"
+3343:     ];
+3344:     const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+3345:     
+3346:     container.innerHTML = `
+3347:       <div style="
+3348:         position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+3349:         background: linear-gradient(rgba(10, 60, 35, 0.55), rgba(8, 45, 25, 0.72)),
+3350:                     url('minke_whale.jpg') no-repeat center center;
+3351:         background-size: cover;
+3352:         display: flex; flex-direction: column;
+3353:         justify-content: center; align-items: center;
+3354:         z-index: 10; color: white; text-align: center; padding: 40px;
+3355:       ">
+3356:         <!-- ① 명언 먼저 -->
+3357:         <div style="max-width: 680px; margin-bottom: 36px; line-height: 2;
+3358:           background: rgba(0,0,0,0.38); padding: 28px 36px;
+3359:           border-radius: 20px; border-top: 4px solid var(--accent-gold);
+3360:           backdrop-filter: blur(8px); box-shadow: 0 8px 28px rgba(0,0,0,0.25);">
+3361:           <p style="font-size: 15px; font-weight: 900; color: var(--accent-gold); margin: 0 0 12px 0; letter-spacing: 1.5px; text-transform: uppercase;">📖 오늘의 동기부여 명언</p>
+3362:           <p style="font-size: clamp(18px, 2.5vw, 24px); font-style: italic; color: #fff; margin: 0; word-break: keep-all; line-height: 1.8; font-weight: 600;">&ldquo;${randomQuote}&rdquo;</p>
+3363:         </div>
+3364: 
+3365:         <!-- ② 안내 문구 -->
+3366:         <h2 style="font-size: clamp(22px, 3.5vw, 36px); font-weight: 900; margin-bottom: 14px;
+3367:           text-shadow: 0 3px 10px rgba(0,0,0,0.6); line-height: 1.45; word-break: keep-all; max-width: 720px;">
+3368:           오늘 학원에 도착해서 무엇을 할것인지<br>
+3369:           스스로 계획을 수립해봅니다
+3370:         </h2>
+3371:         <p style="font-size: clamp(15px, 2vw, 20px); color: rgba(255,255,255,0.88); margin-bottom: 40px;
+3372:           text-shadow: 0 1px 4px rgba(0,0,0,0.4); word-break: keep-all;">
+3373:           차분히 생각하시고 준비가 되면 계획수립 버튼을 누르세요
+3374:         </p>
+3375: 
+3376:         <!-- ③ 버튼 -->
+3377:         <button class="btn btn-emerald" onclick="enterStudentPlanMode()"
+3378:           style="background: var(--accent-gold); color: #3d1a00; font-weight: 900;
+3379:           padding: 18px 56px; font-size: clamp(16px, 2vw, 20px); border-radius: 50px;
+3380:           box-shadow: 0 8px 28px rgba(197,155,39,0.55); border: none; cursor: pointer;
+3381:           transition: transform 0.15s, box-shadow 0.15s; letter-spacing: 0.5px;"
+3382:           onmouseover="this.style.transform='scale(1.07)'; this.style.boxShadow='0 10px 36px rgba(197,155,39,0.7)';"
+3383:           onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 8px 28px rgba(197,155,39,0.55)';">
+3384:           ✏️ 계획수립 시작
+3385:         </button>
+3386:       </div>
+3387:     `;
+3388:     if (window.lucide) window.lucide.createIcons();
+3389:     return;
+3390:   }
+3391:   
+3392:   // 드롭다운 리스트
+3393:   const studentOptions = state.students.map(s => `
+3394:     <option value="${s.id}" ${progressStudentId === s.id ? 'selected' : ''}>${escapeHTML(s.name)}</option>
+3395:   `).join("");
+3396: 
+3397:   container.innerHTML = `
+3398:     <div class="page-header">
+3399:       <div class="page-title">
+3400:         <h1>당일 진도 계획 / 실적 관리</h1>
+3401:         <p>등원 시 계획을 등록하고, 퇴실 시 실적을 기입하여 최종 확정 인쇄합니다.</p>
+3402:       </div>
+3403:       <div class="action-bar">
+3404:         <button class="btn btn-secondary no-print" onclick="window.print()"><i data-lucide="printer"></i> 진도표 인쇄하기</button>
+3405:       </div>
+3406:     </div>
+3407:     
+3408:     <div class="tabs-navigation no-print">
+3409:       <button class="tab-btn ${progressTab === 'plan' ? 'active' : ''}" onclick="toggleProgressTab('plan')">📝 당일 계획 수립</button>
+3410:       <button class="tab-btn ${progressTab === 'result' ? 'active' : ''}" onclick="toggleProgressTab('result')">🏆 당일 실적 등록</button>
+3411:     </div>
+3412:     
+3413:     <div style="display:flex; gap:12px; margin-bottom:20px; align-items:center;" class="no-print">
+3414:       <strong>학생 선택:</strong>
+3415:       <select id="progressStSelector" onchange="changeProgressStudent(this.value)" ${state.currentUser.role === 'student' ? 'disabled' : ''} style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+3416:         ${studentOptions}
+3417:       </select>
+3418:       
+3419:       <strong>날짜 선택:</strong>
+3420:       <input type="date" id="progressDateSelector" value="${state.selectedDate}" onchange="changeProgressDate(this.value)" style="padding:6px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+3421:     </div>
+3422:     
+3423:     <div id="progressTabContent"></div>
+3424:   `;
+3425:   
+3426:   if (window.lucide) window.lucide.createIcons();
+3427:   
+3428:   renderProgressTabContent(progressStudentId);
+3429: }
+3430: 
+3431: function toggleProgressTab(tab) {
+3432:   progressTab = tab;
+3433:   renderProgress();
+3434: }
+3435: 
+3436: function changeProgressStudent(stId) {
+3437:   renderProgressTabContent(stId);
+3438: }
+3439: 
+3440: function changeProgressDate(dateVal) {
+3441:   state.selectedDate = dateVal;
+3442:   renderProgress();
+3443: }
+3444: 
+3445: // 탭 세부 콘텐츠 렌더러
+3446: function renderProgressTabContent(studentId) {
+3447:   const target = document.getElementById("progressTabContent");
+3448:   const st = state.students.find(s => s.id === studentId);
+3449:   if (!st) {
+3450:     target.innerHTML = `<p>등록된 학생 데이터가 없습니다.</p>`;
+3451:     return;
+3452:   }
+3453:   
+3454:   // 오늘 날짜 계획 리스트 필터링
+3455:   const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
+3456:   const isStudent = state.currentUser.role === 'student';
+3457:   
+3458:   if (progressTab === "plan") {
+3459:     // --- 1. 당일 계획 수립 탭 ---
+3460:     
+3461: 
+3462: 
+3463:     let planInputs = "";
+3464:     // 이미 등록된 계획이 있는 경우 리스트 표출
+3465:     if (plansToday.length > 0) {
+3466:       planInputs = plansToday.map((p, idx) => `
+3467:         <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+3468:           <span style="font-weight:700; width:30px;">#${idx + 1}</span>
+3469:           <input type="text" value="${escapeHTML(p.activityName)}" disabled style="flex:2; padding:8px;">
+3470:           <input type="time" value="${p.plannedStartTime}" disabled style="flex:1; padding:8px;">
+3471:           <input type="time" value="${p.plannedEndTime}" disabled style="flex:1; padding:8px;">
+3472:           <span style="font-size:12px; font-weight:700; width:70px; text-align:center;">${p.plannedDuration}분</span>
+3473:           
+3474:           ${p.isPlanConfirmed 
+3475:             ? `<span class="badge badge-emerald">계획확정</span>` 
+3476:             : `
+3477:               ${state.currentUser.role !== 'student' 
+3478:                 ? `<button class="btn btn-emerald" style="padding:4px 8px; font-size:11px;" onclick="approvePlan('${p.id}')">승인</button>` 
+3479:                 : `<span class="badge badge-gray">승인대기</span>`
+3480:               }
+3481:             `
+3482:           }
+3483:         </div>
+3484:       `).join("");
+3485:     } else {
+3486:       // 신규 입력 폼: 기본 10개 입력 줄 보이기 + 미완료 항목 prefill
+3487:       const lastUncompleted = findLastUncompletedPlans(studentId);
+3488:       const initialCount = Math.max(10, lastUncompleted.length);
+3489:       state.currentPlanRowsCount = initialCount;
+3490:       
+3491:       planInputs = Array.from({ length: initialCount }).map((_, idx) => {
+3492:         const defaultPlan = lastUncompleted[idx] || { activityName: "", start: "14:00", end: "15:00" };
+3493:         
+3494:         return `
+3495:           <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+3496:             <span style="font-weight:700; width:30px;">#${idx + 1}</span>
+3497:             <input type="text" id="actName_${idx}" value="${escapeHTML(defaultPlan.activityName)}" placeholder="활동/과제명 입력" style="flex:2; padding:8px;">
+3498:             <input type="time" id="actStart_${idx}" value="${defaultPlan.start}" style="flex:1; padding:8px;">
+3499:             <input type="time" id="actEnd_${idx}" value="${defaultPlan.end}" style="flex:1; padding:8px;">
+3500:           </div>
+3501:         `;
+3502:       }).join("");
+3503:     }
+3504: 
+3505:     target.innerHTML = `
+3506:       <div class="card">
+3507:         <div class="card-title">📖 ${escapeHTML(st.name)} 학생의 당일 계획 등록 대장 (${state.selectedDate})</div>
+3508:         
+3509:         <div style="margin-bottom:20px;">
+3510:           ${plansToday.length === 0 ? `
+3511:             <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
+3512:               * 학생은 등원하자마자 계획을 작성해 제출하며, 강사나 원장의 [계획확정 승인]을 득한 후 실행합니다. (기본 10줄 제공, 미완료 자동 이월)
+3513:             </p>
+3514:             <div id="planFormRows">
+3515:               ${planInputs}
+3516:             </div>
+3517:             
+3518:             <div style="display:flex; gap:12px; margin-top:20px;">
+3519:               <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
+3520:                 <i data-lucide="plus-circle"></i> [+ 계획 추가]
+3521:               </button>
+3522:               <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
+3523:             </div>
+3524:           ` : `
+3525:             <div id="planFormRows">
+3526:               ${planInputs}
+3527:             </div>
+3528:           `}
+3529:         </div>
+3530:       </div>
+3531:     `;
+3532:     if (window.lucide) window.lucide.createIcons();
+3533:     
+3534:   } else {
+3535:     // --- 2. 당일 실적 등록 탭 ---
+3536:     let resultRows = plansToday.map((p, idx) => {
+3537:       const showConfirmed = p.isConfirmed;
+3538:       const actualIn = p.actualStartTime || p.plannedStartTime;
+3539:       const actualOut = p.actualEndTime || p.plannedEndTime;
+3540:       const calcDuration = calculateMinutes(actualIn, actualOut);
+3541:       
+3542:       return `
+3543:         <div class="plan-card ${p.isConfirmed ? 'confirmed' : ''}" style="margin-bottom:16px; padding:16px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+3544:           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+3545:             <span style="font-weight:800; font-size:15px;">#${idx + 1} - ${escapeHTML(p.activityName)}</span>
+3546:             <span style="font-size:12px; color:var(--text-muted);">계획: ${p.plannedStartTime}~${p.plannedEndTime} (${p.plannedDuration}분)</span>
+3547:           </div>
+3548:           
+3549:           <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+3550:             <div class="form-group" style="margin-bottom:0; width:120px;">
+3551:               <label style="font-size:11px;">실제 시작시간</label>
+3552:               <input type="time" id="realStart_${p.id}" value="${actualIn}" ${p.isConfirmed ? 'disabled' : ''} style="padding:6px; width:100%;">
+3553:             </div>
+3554:             <div class="form-group" style="margin-bottom:0; width:120px;">
+3555:               <label style="font-size:11px;">실제 완료시간</label>
+3556:               <input type="time" id="realEnd_${p.id}" value="${actualOut}" ${p.isConfirmed ? 'disabled' : ''} style="padding:6px; width:100%;">
+3557:             </div>
+3558:             
+3559:             <div style="margin-left:12px; display:flex; align-items:center; gap:6px;">
+3560:               <input type="checkbox" id="realComp_${p.id}" ${p.isCompleted ? 'checked' : ''} ${p.isConfirmed ? 'disabled' : ''} style="width:18px; height:18px; cursor:pointer;">
+3561:               <label for="realComp_${p.id}" style="font-weight:700; font-size:12px; cursor:pointer;">활동 완료 여부</label>
+3562:             </div>
+3563:             
+3564:             <div style="margin-left:auto; display:flex; gap:6px;">
+3565:               ${!p.isConfirmed ? `
+3566:                 ${isStudent ? `<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', false)">일시 저장</button>` : ''}
+3567:                 ${state.currentUser.role !== 'student' ? `<button class="btn btn-emerald" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', true)">진도 확정</button>` : ''}
+3568:               ` : `<span class="badge badge-emerald">원장/조교 검재 확정 완료</span>`}
+3569:             </div>
+3570:           </div>
+3571:         </div>
+3572:       `;
+3573:     }).join("");
+3574:     
+3575:     if (resultRows === "") {
+3576:       resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">계획 탭에서 오늘의 계획을 먼저 등록해야 실적 작성이 가능합니다.</p>`;
+3577:     }
+3578: 
+3579:     target.innerHTML = `
+3580:       <div class="card">
+3581:         <div class="card-title">🏆 ${escapeHTML(st.name)} 학생 당일 진도 및 완료 실적 기입 대장</div>
+3582:         ${resultRows}
+3583:       </div>
+3584:     `;
+3585:   }
+3586: }
+3587: 
+3588: // 밍크고래 계획 모드 시작 헬퍼
+3589: function startDailyPlanMode(studentId) {
+3590:   state.hasEnteredPlanMode = true;
+3591:   renderProgressTabContent(studentId);
+3592: }
+3593: 
+3594: // 계획 수립 동적 1줄씩 추가 (최대 20개)
+3595: function addPlanRow(studentId) {
+3596:   const container = document.getElementById("planFormRows");
+3597:   if (!container) return;
+3598:   
+3599:   const currentCount = container.children.length;
+3600:   if (currentCount >= 20) {
+3601:     alert("계획은 최대 20개까지만 등록할 수 있습니다.");
+3602:     return;
+3603:   }
+3604:   
+3605:   const newRow = document.createElement("div");
+3606:   newRow.style.display = "flex";
+3607:   newRow.style.gap = "8px";
+3608:   newRow.style.marginBottom = "10px";
+3609:   newRow.style.alignItems = "center";
+3610:   
+3611:   newRow.innerHTML = `
+3612:     <span style="font-weight:700; width:30px;">#${currentCount + 1}</span>
+3613:     <input type="text" id="actName_${currentCount}" placeholder="활동/과제명 입력" style="flex:2; padding:8px;">
+3614:     <input type="time" id="actStart_${currentCount}" value="14:00" style="flex:1; padding:8px;">
+3615:     <input type="time" id="actEnd_${currentCount}" value="15:00" style="flex:1; padding:8px;">
+3616:   `;
+3617:   
+3618:   container.appendChild(newRow);
+3619:   state.currentPlanRowsCount = currentCount + 1;
+3620: }
+3621: 
+3622: // 이전 등원 일자 중 '미완료' 상태로 남겨진 진도 계획 선별 기능
+3623: function findLastUncompletedPlans(studentId) {
+3624:   const sortedPlans = [...state.dailyPlans]
+3625:     .filter(p => p.studentId === studentId && !p.isCompleted && p.date < state.selectedDate)
+3626:     .sort((a, b) => new Date(b.date) - new Date(a.date));
+3627:     
+3628:   // 고유 활동명 기준 중복 제거하여 미완료 리스트 반환
+3629:   const uniqueNames = new Set();
+3630:   const result = [];
+3631:   
+3632:   sortedPlans.forEach(p => {
+3633:     if (!uniqueNames.has(p.activityName)) {
+3634:       uniqueNames.add(p.activityName);
+3635:       result.push({
+3636:         activityName: p.activityName,
+3637:         start: p.plannedStartTime,
+3638:         end: p.plannedEndTime
+3639:       });
+3640:     }
+3641:   });
+3642:   
+3643:   return result;
+3644: }
+3645: 
+3646: // 계획 수립 시간 중첩(오버랩) 검증 헬퍼
+3647: function checkTimeOverlaps(plans) {
+3648:   for (let i = 0; i < plans.length; i++) {
+3649:     const p1 = plans[i].data;
+3650:     const s1 = p1.plannedStartTime;
+3651:     const e1 = p1.plannedEndTime;
+3652:     
+3653:     // 1. 현재 입력된 계획들끼리 중첩 검사
+3654:     for (let j = i + 1; j < plans.length; j++) {
+3655:       const p2 = plans[j].data;
+3656:       const s2 = p2.plannedStartTime;
+3657:       const e2 = p2.plannedEndTime;
+3658:       
+3659:       if (s1 < e2 && s2 < e1) {
+3660:         return `입력하신 계획 중 [#${i+1} ${p1.activityName}](${s1}~${e1})와 [#${j+1} ${p2.activityName}](${s2}~${e2})의 계획 시간이 중첩됩니다. 다른 시간대로 설정해 주세요.`;
+3661:       }
+3662:     }
+3663:     
+3664:     // 2. 이미 등록된 오늘 계획과 중첩 검사
+3665:     const existing = state.dailyPlans.filter(p => p.studentId === p1.studentId && p.date === p1.date);
+3666:     for (const p2 of existing) {
+3667:       const s2 = p2.plannedStartTime;
+3668:       const e2 = p2.plannedEndTime;
+3669:       
+3670:       if (s1 < e2 && s2 < e1) {
+3671:         return `이미 오늘 등록 완료된 계획 [${p2.activityName}](${s2}~${e2})와 입력하신 [${p1.activityName}](${s1}~${e1})의 계획 시간이 중첩됩니다. 다른 시간대로 설정해 주세요.`;
+3672:       }
+3673:     }
+3674:   }
+3675:   return null;
+3676: }
+3677: 
+3678: // 학생 계획 제출
+3679: async function submitDailyPlans(studentId) {
+3680:   const plans = [];
+3681:   
+3682:   for (let idx = 0; idx < 20; idx++) {
+3683:     const elName = document.getElementById(`actName_${idx}`);
+3684:     if (!elName) continue;
+3685:     
+3686:     const name = elName.value.trim();
+3687:     if (name === "") continue;
+3688:     
+3689:     const start = document.getElementById(`actStart_${idx}`).value;
+3690:     const end = document.getElementById(`actEnd_${idx}`).value;
+3691:     
+3692:     if (!start || !end) {
+3693:       alert("계획의 시작 시간과 종료 시간을 모두 입력해 주세요.");
+3694:       return;
+3695:     }
+3696:     
+3697:     const id = `pl-${studentId}-${state.selectedDate}-${idx}`;
+3698:     const planRecord = {
+3699:       id,
+3700:       studentId,
+3701:       date: state.selectedDate,
+3702:       activityName: name,
+3703:       plannedStartTime: start,
+3704:       plannedEndTime: end,
+3705:       plannedDuration: calculateMinutes(start, end),
+3706:       actualStartTime: "",
+3707:       actualEndTime: "",
+3708:       isCompleted: false,
+3709:       isConfirmed: false,
+3710:       isPlanConfirmed: false
+3711:     };
+3712:     
+3713:     plans.push({ id, data: planRecord });
+3714:   }
+3715:   
+3716:   if (plans.length === 0) {
+3717:     alert("활동명을 1개 이상 입력해 주세요.");
+3718:     return;
+3719:   }
+3720:   
+3721:   // 시간 중첩 검사 수행
+3722:   const overlapError = checkTimeOverlaps(plans);
+3723:   if (overlapError) {
+3724:     alert(overlapError);
+3725:     return;
+3726:   }
+3727:   
+3728:   if (!supabaseClient) {
+3729:     // 오프라인 모드 Fallback 저장
+3730:     plans.forEach(p => {
+3731:       // 중복 방지
+3732:       const existIdx = state.dailyPlans.findIndex(o => o.id === p.id);
+3733:       if (existIdx !== -1) {
+3734:         state.dailyPlans[existIdx] = p.data;
+3735:       } else {
+3736:         state.dailyPlans.push(p.data);
+3737:       }
+3738:     });
+3739:     alert("오늘의 학습 계획이 제출되었습니다. (오프라인 모드)");
+3740:     renderProgress();
+3741:     return;
+3742:   }
+3743:   
+3744:   try {
+3745:     const { error } = await supabaseClient.from("agy_daily_plans").insert(plans);
+3746:     if (!error) {
+3747:       alert("오늘의 학습 계획이 제출되었습니다. 담당 선생님 승인 후 완료 진행하세요.");
+3748:       await loadAllData();
+3749:       renderProgress();
+3750:     } else {
+3751:       alert("제출 실패");
+3752:     }
+3753:   } catch (err) {
+3754:     console.error(err);
+3755:   }
+3756: }
+3757: 
+3758: // 원장/조교 계획 승인
+3759: async function approvePlan(planId) {
+3760:   const plan = state.dailyPlans.find(p => p.id === planId);
+3761:   if (!plan) return;
+3762:   
+3763:   plan.isPlanConfirmed = true;
+3764:   
+3765:   if (!supabaseClient) {
+3766:     alert("계획이 승인되었습니다. (오프라인 모드)");
+3767:     renderProgress();
+3768:     return;
+3769:   }
+3770:   
+3771:   try {
+3772:     const { error } = await supabaseClient
+3773:       .from("agy_daily_plans")
+3774:       .update({ data: plan })
+3775:       .eq("id", planId);
+3776:       
+3777:     if (!error) {
+3778:       await loadAllData();
+3779:       renderProgress();
+3780:     }
+3781:   } catch (err) {
+3782:     console.error(err);
+3783:   }
+3784: }
+3785: 
+3786: // 학생 실적 임시 저장 및 교사 확정
+3787: async function saveStudentResult(planId, makeConfirmed) {
+3788:   const start = document.getElementById(`realStart_${planId}`).value;
+3789:   const end = document.getElementById(`realEnd_${planId}`).value;
+3790:   const isCompleted = document.getElementById(`realComp_${planId}`).checked;
+3791:   
+3792:   const plan = state.dailyPlans.find(p => p.id === planId);
+3793:   if (!plan) return;
+3794:   
+3795:   plan.actualStartTime = start;
+3796:   plan.actualEndTime = end;
+3797:   plan.isCompleted = isCompleted;
+3798:   plan.isConfirmed = makeConfirmed;
+3799:   
+3800:   if (!supabaseClient) {
+3801:     alert(makeConfirmed ? "진도가 완료 확정되었습니다. (오프라인 모드)" : "실적이 임시 저장되었습니다. (오프라인 모드)");
+3802:     renderProgress();
+3803:     return;
+3804:   }
+3805:   
+3806:   try {
+3807:     const { error } = await supabaseClient
+3808:       .from("agy_daily_plans")
+3809:       .update({ data: plan })
+3810:       .eq("id", planId);
+3811:       
+3812:     if (!error) {
+3813:       alert(makeConfirmed ? "진도가 완료 확정되었습니다." : "실적이 임시 저장되었습니다.");
+3814:       await loadAllData();
+3815:       renderProgress();
+3816:     }
+3817:   } catch (err) {
+3818:     console.error(err);
+3819:   }
+3820: }
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+

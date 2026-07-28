@@ -239,6 +239,9 @@ async function loadAllData() {
     state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
     state.notices = (resNotices.data || []).map(r => r.data);
     state.consultations = (resConsultations.data || []).map(r => r.data);
+    if ((!state.consultations || state.consultations.length === 0) && window.mockData && window.mockData.consultations) {
+      state.consultations = window.mockData.consultations;
+    }
     
     state.monthlyOperations = {};
     (resOperations.data || []).forEach(r => {
@@ -892,8 +895,19 @@ window.applyBulkOpsTime = applyBulkOpsTime;
 
 function changeOpsMonth(ym) {
   opsYearMonth = ym;
-  renderOperations();
+  if (state.currentView === 'teachers') {
+    renderTeachers();
+  } else if (state.currentView === 'operations') {
+    renderOperations();
+  } else if (state.currentView === 'studentEnrollments') {
+    renderStudentEnrollments();
+  } else if (state.currentView === 'enrollments') {
+    renderEnrollments();
+  } else {
+    renderMainContent();
+  }
 }
+window.changeOpsMonth = changeOpsMonth;
 
 // 개별 날짜 운영시간 수정 모달
 function openEditDayConfigModal(dateStr) {
@@ -1719,7 +1733,7 @@ async function handleAddExtraAttendance() {
 
 
 // --- ④ 강사 관리 뷰 ---
-let teacherTab = "reg"; // reg: 강사등록, plan: 근무계획, log: 근무일지
+let teacherTab = "plan"; // reg: 강사등록, plan: 근무계획, log: 근무일지
 
 function renderTeachers() {
   const container = document.getElementById("mainContent");
@@ -1895,61 +1909,27 @@ function renderTeacherPlan() {
     return;
   }
 
-  // 1. 요일별 강사 계획 리스트 데이터 생성
-  const days = ["월", "화", "수", "목", "금", "토", "일"];
-  const weekdayHTML = days.map(day => {
-    const daySchedules = state.teacherSchedules.filter(sch => sch.dayOfWeek === day);
-    let schedsHTML = daySchedules.map(sch => {
-      const tc = state.teachers.find(t => t.id === sch.teacherId);
-      if (!tc) return "";
-      return `
-        <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:10px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <strong style="color:var(--text-dark); font-size:13px;">${escapeHTML(tc.name)}</strong>
-            <span style="display:block; font-size:11px; color:var(--text-muted); margin-top:2px;">${sch.startTime} - ${sch.endTime}</span>
-          </div>
-          <button class="btn btn-danger" style="padding:2px 6px; font-size:10px; border-radius:var(--radius-sm);" onclick="deleteTeacherSchedule('${sch.id}')">삭제</button>
-        </div>
-      `;
-    }).join("");
-
-    if (schedsHTML === "") {
-      schedsHTML = `<p style="text-align:center; font-size:12px; color:var(--text-muted); padding:16px 0; margin:0;">근무 없음</p>`;
-    }
-
-    return `
-      <div class="card" style="padding:16px; display:flex; flex-direction:column; min-width:160px; box-shadow:var(--shadow-sm); border:1px solid var(--border-color); margin-bottom:0;">
-        <div style="border-bottom:2px solid var(--primary-color); padding-bottom:8px; margin-bottom:12px; font-weight:800; font-size:14px; text-align:center; color:var(--primary-color);">
-          ${day}요일
-        </div>
-        <div style="flex-grow:1;">
-          ${schedsHTML}
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  // 2. 강사 근무 월간 캘린더 생성
+  // 1. 강사 근무 월간 캘린더 생성 (요일별 리스트 삭제)
   const [year, month] = opsYearMonth.split("-").map(Number);
   const firstDayIndex = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
-  const dayOfWeekMap = ["일", "월", "화", "수", "목", "금", "토"];
 
   let calendarCells = "";
   for (let i = 0; i < firstDayIndex; i++) {
     calendarCells += `<div class="calendar-cell inactive"></div>`;
   }
   for (let d = 1; d <= daysInMonth; d++) {
-    const curDate = new Date(year, month - 1, d);
-    const dayName = dayOfWeekMap[curDate.getDay()];
+    const curDateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     
-    const daySchedules = state.teacherSchedules.filter(sch => sch.dayOfWeek === dayName);
+    // date가 일치하는 스케줄만 필터링 (과거 dayOfWeek 데이터는 무시됨)
+    const daySchedules = state.teacherSchedules.filter(sch => sch.date === curDateStr);
     
     let tcBadges = daySchedules.map(sch => {
       const tc = state.teachers.find(t => t.id === sch.teacherId);
       if (!tc) return "";
-      return `<div style="font-size:11px; background:rgba(19,92,57,0.08); color:var(--primary-color); border:1px solid rgba(19,92,57,0.2); border-radius:4px; padding:3px 6px; margin-top:4px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-        👩‍🏫 ${escapeHTML(tc.name)} <span style="font-size:10px; font-weight:600; opacity:0.85;">(${sch.startTime}~${sch.endTime})</span>
+      return `<div style="font-size:11px; background:rgba(19,92,57,0.08); color:var(--primary-color); border:1px solid rgba(19,92,57,0.2); border-radius:4px; padding:3px 6px; margin-top:4px; font-weight:700; display:flex; justify-content:space-between; align-items:center;">
+        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">👩‍🏫 ${escapeHTML(tc.name)} <span style="font-size:10px; font-weight:600; opacity:0.85;">(${sch.startTime}~${sch.endTime})</span></span>
+        <button class="btn btn-danger" style="padding:1px 4px; font-size:10px; border-radius:2px; margin-left:4px;" onclick="event.stopPropagation(); deleteTeacherSchedule('${sch.id}')">&times;</button>
       </div>`;
     }).join("");
 
@@ -1958,7 +1938,7 @@ function renderTeacherPlan() {
     }
 
     calendarCells += `
-      <div class="calendar-cell operating" style="min-height:80px; align-items:flex-start; justify-content:flex-start; text-align:left; padding:8px;">
+      <div class="calendar-cell operating" style="min-height:100px; align-items:flex-start; justify-content:flex-start; text-align:left; padding:8px; cursor:pointer;" onclick="openNewScheduleModal('${curDateStr}')">
         <span class="day-num" style="font-weight:800; font-size:12px;">${d}</span>
         <div style="width:100%; margin-top:2px;">
           ${tcBadges}
@@ -1968,20 +1948,10 @@ function renderTeacherPlan() {
   }
 
   target.innerHTML = `
-    <!-- 1. 요일별 강사 계획 리스트 섹션 (최상단 노출) -->
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <h3 style="font-weight:700; font-size:16px;">📌 요일별 강사 계획 리스트</h3>
-      <button class="btn btn-emerald" onclick="openNewScheduleModal()"><i data-lucide="plus"></i> 주간 일정 수립</button>
-    </div>
-
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:14px; margin-bottom:32px;">
-      ${weekdayHTML}
-    </div>
-
-    <!-- 2. 강사 근무 월간 캘린더 섹션 (신규 추가) -->
-    <div class="card" style="margin-top:24px;">
+    <!-- 강사 근무 월간 캘린더 섹션 -->
+    <div class="card" style="margin-top:0;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-        <div class="card-title" style="margin-bottom:0;">🗓 강사 근무 월간 캘린더</div>
+        <div class="card-title" style="margin-bottom:0;">🗓 강사 근무 월간 캘린더 (해당 일자를 클릭하여 근무를 등록하세요)</div>
         <select id="teacherMonthSelector" onchange="changeOpsMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700;">
           <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
           <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
@@ -2004,12 +1974,12 @@ function renderTeacherPlan() {
   if (window.lucide) window.lucide.createIcons();
 }
 
-function openNewScheduleModal() {
+function openNewScheduleModal(dateStr) {
   const options = state.teachers.map(t => `<option value="${t.id}">${escapeHTML(t.name)}</option>`).join("");
   
   openModal(`
     <div class="modal-header">
-      <h3>강사 근무 일정 수립 (10분 단위 제어)</h3>
+      <h3>강사 근무 일정 수립 (${dateStr})</h3>
       <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -2017,18 +1987,7 @@ function openNewScheduleModal() {
         <label>대상 강사</label>
         <select id="schTeacherId">${options}</select>
       </div>
-      <div class="form-group">
-        <label>요일</label>
-        <select id="schDay">
-          <option value="월">월요일</option>
-          <option value="화">화요일</option>
-          <option value="수">수요일</option>
-          <option value="목">목요일</option>
-          <option value="금">금요일</option>
-          <option value="토">토요일</option>
-          <option value="일">일요일</option>
-        </select>
-      </div>
+      <input type="hidden" id="schDate" value="${dateStr}">
       <div style="display:flex; gap:12px;">
         <div class="form-group" style="flex:1;">
           <label>출근 계획시간</label>
@@ -2061,15 +2020,17 @@ function alignToTenMinutes(input) {
 
 async function handleNewSchedule() {
   const teacherId = document.getElementById("schTeacherId").value;
-  const dayOfWeek = document.getElementById("schDay").value;
+  const date = document.getElementById("schDate").value;
   const startTime = document.getElementById("schStart").value;
   const endTime = document.getElementById("schEnd").value;
   
   const id = `sch-${Date.now()}`;
-  const data = { id, teacherId, dayOfWeek, startTime, endTime };
+  const data = { id, teacherId, date, startTime, endTime };
   
   try {
-    await supabaseClient.from("agy_teacher_schedules").insert([{ id, data }]);
+    if (supabaseClient) {
+      await supabaseClient.from("agy_teacher_schedules").insert([{ id, data }]);
+    }
     alert("근무 계획이 생성되었습니다.");
     await loadAllData();
     closeModal();
@@ -2387,6 +2348,166 @@ function renderEnrollments() {
   
   // 그리드 시간표 렌더링
   renderGridTimetable();
+}
+
+function getGradeGroup(gradeStr) {
+  if (["1", "2", "3", "4"].includes(gradeStr)) {
+    return "초등저학년";
+  } else if (["5", "6"].includes(gradeStr)) {
+    return "초등고학년";
+  } else if (gradeStr && gradeStr.startsWith("중")) {
+    return "중등";
+  } else if (gradeStr && gradeStr.startsWith("고")) {
+    return "고등";
+  }
+  return "기타";
+}
+
+function renderGridTimetable() {
+  const target = document.getElementById("timetableGridTarget");
+  
+  // 세로 시간 축 범위 생성 (30분 간격, 학원 운영 기준 13:00 ~ 22:00)
+  const startHour = 13;
+  const endHour = 22;
+  const timeSlots = [];
+  
+  for (let h = startHour; h < endHour; h++) {
+    timeSlots.push(`${String(h).padStart(2, "0")}:00`);
+    timeSlots.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  timeSlots.push("22:00");
+  
+  // 가로 학년군 그룹
+  const gradeGroups = ["초등저학년", "초등고학년", "중등", "고등"];
+  
+  // 데이터 선별
+  const targetDate = state.selectedDate;
+  const enrollsToday = state.enrollments.filter(e => e.date === targetDate);
+  
+  if (scheduleViewMode === "daily") {
+    // --- 일별 그리드 렌더링 ---
+    let tableHTML = `
+      <div class="timetable-grid-container">
+        <table class="timetable-grid-table">
+          <thead>
+            <tr>
+              <th class="timetable-time-col">운영 시간</th>
+              <th>초등 저 (1~4학년)</th>
+              <th>초등 고 (5,6학년)</th>
+              <th>중등부</th>
+              <th>고등부</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+    
+    // 각 시간 슬롯별 행 생성
+    for (let t = 0; t < timeSlots.length - 1; t++) {
+      const slotStart = timeSlots[t];
+      const slotEnd = timeSlots[t + 1];
+      
+      tableHTML += `<tr><td class="timetable-time-col">${slotStart} ~ ${slotEnd}</td>`;
+      
+      // 학년군별 컬럼 데이터 매핑
+      gradeGroups.forEach(grp => {
+        // 해당 날짜, 해당 학년군에 해당하는 학생 중 이 30분 슬롯 시간대에 걸쳐 수강하는 학생 추출
+        const matchingStudents = enrollsToday.filter(enr => {
+          const st = state.students.find(s => s.id === enr.studentId);
+          if (!st) return false;
+          
+          const stGrp = getGradeGroup(st.grade);
+          if (stGrp !== grp) return false;
+          
+          // 겹침 검증: [startTime, endTime] 이 [slotStart, slotEnd] 와 겹치는지 체크
+          return (enr.startTime < slotEnd && enr.endTime > slotStart);
+        });
+        
+        let badgesHTML = matchingStudents.map(enr => {
+          const st = state.students.find(s => s.id === enr.studentId);
+          const isNew = isStudentNew(st.registeredDate);
+          const nameClass = isNew ? "name new-student-highlight" : "name";
+          
+          return `
+            <div class="timetable-card-badge">
+              <span class="${nameClass}">${escapeHTML(st.name)}</span>
+              <span class="time-text">${enr.startTime}~${enr.endTime}</span>
+            </div>
+          `;
+        }).join("");
+        
+        tableHTML += `<td>${badgesHTML}</td>`;
+      });
+      
+      tableHTML += `</tr>`;
+    }
+    
+    tableHTML += `</tbody></table></div>`;
+    target.innerHTML = tableHTML;
+    
+  } else {
+    // --- 주간 그리드 렌더링 ---
+    // 선택된 일자의 월~토(일주간)를 탐색
+    const current = new Date(state.selectedDate);
+    const day = current.getDay();
+    const distanceToMon = day === 0 ? -6 : 1 - day; // 월요일 기준 계산
+    const monday = new Date(current.setDate(current.getDate() + distanceToMon));
+    
+    const weekdays = [];
+    const dayNames = ["월", "화", "수", "목", "금", "토"];
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      weekdays.push(d.toISOString().split("T")[0]);
+    }
+    
+    let tableHTML = `
+      <div class="timetable-grid-container">
+        <table class="timetable-grid-table">
+          <thead>
+            <tr>
+              <th class="timetable-time-col">운영 시간</th>
+              ${weekdays.map((date, idx) => `<th>${dayNames[idx]}요일 (${date.substring(5)})</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+    `;
+    
+    for (let t = 0; t < timeSlots.length - 1; t++) {
+      const slotStart = timeSlots[t];
+      const slotEnd = timeSlots[t + 1];
+      
+      tableHTML += `<tr><td class="timetable-time-col">${slotStart} ~ ${slotEnd}</td>`;
+      
+      // 요일별 컬럼
+      weekdays.forEach(date => {
+        const enrollsThisDay = state.enrollments.filter(e => e.date === date);
+        const matching = enrollsThisDay.filter(enr => {
+          return (enr.startTime < slotEnd && enr.endTime > slotStart);
+        });
+        
+        let badgesHTML = matching.map(enr => {
+          const st = state.students.find(s => s.id === enr.studentId);
+          if (!st) return "";
+          const isNew = isStudentNew(st.registeredDate);
+          const nameClass = isNew ? "name new-student-highlight" : "name";
+          
+          return `
+            <div class="timetable-card-badge" style="margin-bottom:4px;">
+              <span class="${nameClass}">${escapeHTML(st.name)}</span>
+              <span class="time-text">${enr.startTime}~${enr.endTime}</span>
+            </div>
+          `;
+        }).join("");
+        
+        tableHTML += `<td>${badgesHTML}</td>`;
+      });
+      
+      tableHTML += `</tr>`;
+    }
+    
+    tableHTML += `</tbody></table></div>`;
+    target.innerHTML = tableHTML;
+  }
 }
 
 function renderStudentEnrollments() {
@@ -2820,14 +2941,7 @@ function changeEnrollStudent(stId) {
   }
 }
 
-function changeOpsMonth(ym) {
-  opsYearMonth = ym;
-  if (state.currentView === 'studentEnrollments') {
-    renderStudentEnrollments();
-  } else {
-    renderEnrollments();
-  }
-}
+
 
 function changeGridDate(dateVal) {
   state.selectedDate = dateVal;
@@ -3004,11 +3118,7 @@ function handleCalendarDateClick(dateStr, isHoliday) {
             <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="handleSaveEnrollment('${dateStr}')">일정 저장 (추가)</button>
           </div>
         </div>
-      ` : `
-        <div style="margin-top:16px; border-top:1px dashed var(--border-color); padding-top:16px; text-align:center; color:#ef4444; font-weight:700; font-size:13px;">
-          🚫 하루 최대 2개의 수강 일정만 등록 가능합니다.
-        </div>
-      `}
+      `: ''}
     </div>
   `);
 }
@@ -3165,206 +3275,17 @@ async function handleSaveEnrollment(dateStr) {
 
   try {
     const upserts = targetDates.map(dt => {
-      const id = `enr-${enrollSelectedStudentId}-${dt}-${Date.now()}`;
-      const data = {
-        id,
-        studentId: enrollSelectedStudentId,
-        date: dt,
-        startTime,
-        endTime
-      };
-      return supabaseClient.from("agy_enrollments").upsert([{ id, data }]);
+      const id = `enr-std-${enrollSelectedStudentId}-${dt}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      return { id, studentId: enrollSelectedStudentId, date: dt, startTime, endTime };
     });
     
-    await Promise.all(upserts);
-    alert("수강 일정이 성공적으로 추가 등록되었습니다.");
-    await loadAllData();
+    state.enrollments.push(...upserts);
+    await supabaseClient.from("agy_enrollments").upsert(upserts.map(u => ({ id: u.id, data: u })));
     closeModal();
-    renderEnrollments();
-  } catch (err) {
-    console.error(err);
-  }
+    renderStudentEnrollments();
+  } catch(e) { console.error(e); alert("저장 실패"); }
 }
-
-async function deleteEnrollment(id) {
-  if (confirm("해당 수강신청을 취소(삭제)하시겠습니까?")) {
-    try {
-      await supabaseClient.from("agy_enrollments").delete().eq("id", id);
-      alert("수강 일정이 취소되었습니다.");
-      await loadAllData();
-      closeModal();
-      renderEnrollments();
-    } catch (err) {
-      console.error(err);
-    }
-  }
-}
-
-// 학년군 분류 헬퍼
-function getGradeGroup(gradeStr) {
-  if (["1", "2", "3", "4"].includes(gradeStr)) {
-    return "초등저학년";
-  } else if (["5", "6"].includes(gradeStr)) {
-    return "초등고학년";
-  } else if (gradeStr && gradeStr.startsWith("중")) {
-    return "중등";
-  } else if (gradeStr && gradeStr.startsWith("고")) {
-    return "고등";
-  }
-  return "기타";
-}
-
-// 대형 그리드 렌더러
-function renderGridTimetable() {
-  const target = document.getElementById("timetableGridTarget");
-  if (!target) return;
-  
-  // 세로 시간 축 범위 생성 (30분 간격, 학원 운영 기준 13:00 ~ 22:00)
-  const startHour = 13;
-  const endHour = 22;
-  const timeSlots = [];
-  
-  for (let h = startHour; h < endHour; h++) {
-    timeSlots.push(`${String(h).padStart(2, "0")}:00`);
-    timeSlots.push(`${String(h).padStart(2, "0")}:30`);
-  }
-  timeSlots.push("22:00");
-  
-  // 가로 학년군 그룹
-  const gradeGroups = ["초등저학년", "초등고학년", "중등", "고등"];
-  
-  // 데이터 선별
-  const targetDate = state.selectedDate;
-  const enrollsToday = state.enrollments.filter(e => e.date === targetDate);
-  
-  if (scheduleViewMode === "daily") {
-    // --- 일별 그리드 렌더링 ---
-    let tableHTML = `
-      <div class="timetable-grid-container">
-        <table class="timetable-grid-table">
-          <thead>
-            <tr>
-              <th class="timetable-time-col">운영 시간</th>
-              <th>초등 저 (1~4학년)</th>
-              <th>초등 고 (5,6학년)</th>
-              <th>중등부</th>
-              <th>고등부</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
-    
-    // 각 시간 슬롯별 행 생성
-    for (let t = 0; t < timeSlots.length - 1; t++) {
-      const slotStart = timeSlots[t];
-      const slotEnd = timeSlots[t + 1];
-      
-      tableHTML += `<tr><td class="timetable-time-col">${slotStart} ~ ${slotEnd}</td>`;
-      
-      // 학년군별 컬럼 데이터 매핑
-      gradeGroups.forEach(grp => {
-        // 해당 날짜, 해당 학년군에 해당하는 학생 중 이 30분 슬롯 시간대에 걸쳐 수강하는 학생 추출
-        const matchingStudents = enrollsToday.filter(enr => {
-          const st = state.students.find(s => s.id === enr.studentId);
-          if (!st) return false;
-          
-          const stGrp = getGradeGroup(st.grade);
-          if (stGrp !== grp) return false;
-          
-          // 겹침 검증: [startTime, endTime] 이 [slotStart, slotEnd] 와 겹치는지 체크
-          return (enr.startTime < slotEnd && enr.endTime > slotStart);
-        });
-        
-        let badgesHTML = matchingStudents.map(enr => {
-          const st = state.students.find(s => s.id === enr.studentId);
-          const isNew = isStudentNew(st.registeredDate);
-          const nameClass = isNew ? "name new-student-highlight" : "name";
-          
-          return `
-            <div class="timetable-card-badge">
-              <span class="${nameClass}">${escapeHTML(st.name)}</span>
-              <span class="time-text">${enr.startTime}~${enr.endTime}</span>
-            </div>
-          `;
-        }).join("");
-        
-        const cellContainer = badgesHTML ? `<div class="timetable-badge-grid">${badgesHTML}</div>` : '';
-        tableHTML += `<td>${cellContainer}</td>`;
-      });
-      
-      tableHTML += `</tr>`;
-    }
-    
-    tableHTML += `</tbody></table></div>`;
-    target.innerHTML = tableHTML;
-    
-  } else {
-    // --- 주간 그리드 렌더링 ---
-    // 선택된 일자의 월~토(일주간)를 탐색
-    const current = new Date(state.selectedDate);
-    const day = current.getDay();
-    const distanceToMon = day === 0 ? -6 : 1 - day; // 월요일 기준 계산
-    const monday = new Date(current.setDate(current.getDate() + distanceToMon));
-    
-    const weekdays = [];
-    const dayNames = ["월", "화", "수", "목", "금", "토"];
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      weekdays.push(d.toISOString().split("T")[0]);
-    }
-    
-    let tableHTML = `
-      <div class="timetable-grid-container">
-        <table class="timetable-grid-table">
-          <thead>
-            <tr>
-              <th class="timetable-time-col">운영 시간</th>
-              ${weekdays.map((date, idx) => `<th>${dayNames[idx]}요일 (${date.substring(5)})</th>`).join("")}
-            </tr>
-          </thead>
-          <tbody>
-    `;
-    
-    for (let t = 0; t < timeSlots.length - 1; t++) {
-      const slotStart = timeSlots[t];
-      const slotEnd = timeSlots[t + 1];
-      
-      tableHTML += `<tr><td class="timetable-time-col">${slotStart} ~ ${slotEnd}</td>`;
-      
-      // 요일별 컬럼
-      weekdays.forEach(date => {
-        const enrollsThisDay = state.enrollments.filter(e => e.date === date);
-        const matching = enrollsThisDay.filter(enr => {
-          return (enr.startTime < slotEnd && enr.endTime > slotStart);
-        });
-        
-        let badgesHTML = matching.map(enr => {
-          const st = state.students.find(s => s.id === enr.studentId);
-          if (!st) return "";
-          const isNew = isStudentNew(st.registeredDate);
-          const nameClass = isNew ? "name new-student-highlight" : "name";
-          
-          return `
-            <div class="timetable-card-badge">
-              <span class="${nameClass}">${escapeHTML(st.name)}</span>
-              <span class="time-text">${enr.startTime}~${enr.endTime}</span>
-            </div>
-          `;
-        }).join("");
-        
-        const cellContainer = badgesHTML ? `<div class="timetable-badge-grid">${badgesHTML}</div>` : '';
-        tableHTML += `<td>${cellContainer}</td>`;
-      });
-      
-      tableHTML += `</tr>`;
-    }
-    
-    tableHTML += `</tbody></table></div>`;
-    target.innerHTML = tableHTML;
-  }
-}
-
+window.handleSaveEnrollment = handleSaveEnrollment;
 
 // --- ⑥ 진도 관리 뷰 ---
 let progressTab = "plan"; // plan: 당일계획수립, result: 당일실적등록, stats: 진도이력조회
@@ -3389,6 +3310,21 @@ function renderProgress() {
 
   // 진도관리 대기화면 조건 확인 (학생 계정일 때만 첫 진입 시 표출)
   const isStudent = state.currentUser && state.currentUser.role === 'student';
+
+  // 출석(확정) 여부 체크 (진도관리 접근 제한)
+  const hasAttendance = state.attendance.some(a => a.studentId === progressStudentId && a.date === state.selectedDate);
+  if (isStudent && !hasAttendance) {
+    container.innerHTML = `
+      <div style="padding:60px; text-align:center; margin-top:20px; color:var(--text-muted);">
+        <i data-lucide="alert-circle" style="width:64px; height:64px; color:var(--accent-red); margin-bottom:16px;"></i>
+        <h2 style="color:var(--text-dark); margin-bottom:12px;">출석 확인 필요</h2>
+        <p>오늘(${state.selectedDate}) 출결 관리에 등록(출석 확정)되지 않았습니다.<br>출결 관리에 먼저 등록 후 이용해 주세요.</p>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+    return;
+  }
+
   if (isStudent && !state.hasEnteredPlanMode) {
     const quotes = window.mockData.quotes || [
       "배움의 깊이를 더하는 상아탑에서의 하루가 미래를 바꿉니다.",
@@ -3509,6 +3445,21 @@ function renderProgressTabContent(studentId) {
     target.innerHTML = `<p>등록된 학생 데이터가 없습니다.</p>`;
     return;
   }
+
+  // 출석 체크 로직 (학생 계정인 경우만 미출석 시 접근 제한, 원장/강사는 바로 조회 및 승인 가능)
+  const isStudentRole = state.currentUser && state.currentUser.role === 'student';
+  const hasAttendance = state.attendance.some(a => a.studentId === studentId && a.date === state.selectedDate);
+  if (isStudentRole && !hasAttendance) {
+    target.innerHTML = `
+      <div class="card" style="text-align:center; padding:40px; margin-top:20px; color:var(--text-muted);">
+        <i data-lucide="alert-circle" style="width:48px; height:48px; margin:0 auto 12px; color:var(--accent-red)"></i>
+        <h2 style="font-size:18px; font-weight:700; color:var(--text-dark); margin-bottom:12px;">출석 확인 필요</h2>
+        <p>오늘(${state.selectedDate}) 출결 관리에 등록(출석 확정)되지 않았습니다.<br>출결 관리에 먼저 등록 후 이용해 주세요.</p>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+    return;
+  }
   
   // 오늘 날짜 계획 리스트 필터링
   const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
@@ -3516,14 +3467,12 @@ function renderProgressTabContent(studentId) {
   
   if (progressTab === "plan") {
     // --- 1. 당일 계획 수립 탭 ---
-    
-
-
     let planInputs = "";
     // 이미 등록된 계획이 있는 경우 리스트 표출
     if (plansToday.length > 0) {
       planInputs = plansToday.map((p, idx) => `
         <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+          ${state.currentUser.role !== 'student' && !p.isPlanConfirmed ? `<input type="checkbox" class="plan-bulk-chk" value="${p.id}" style="width:16px; height:16px; cursor:pointer;" checked>` : ''}
           <span style="font-weight:700; width:30px;">#${idx + 1}</span>
           <input type="text" value="${escapeHTML(p.activityName)}" disabled style="flex:2; padding:8px;">
           <input type="time" value="${p.plannedStartTime}" disabled style="flex:1; padding:8px;">
@@ -3579,6 +3528,7 @@ function renderProgressTabContent(studentId) {
                 <i data-lucide="plus-circle"></i> [+ 계획 추가]
               </button>
               <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
+              ${state.currentUser.role !== 'student' && plansToday.length > 0 ? `<button class="btn btn-emerald" style="flex:2; justify-content:center; background:#047857;" onclick="bulkApprovePlans()">✅ 선택 항목 일괄 승인</button>` : ''}
             </div>
           ` : `
             <div id="planFormRows">
@@ -3622,6 +3572,7 @@ function renderProgressTabContent(studentId) {
             
             <div style="margin-left:auto; display:flex; gap:6px;">
               ${!p.isConfirmed ? `
+                <input type="checkbox" class="result-bulk-chk" value="${p.id}" style="width:18px; height:18px; align-self:center; margin-right:8px; cursor:pointer;" title="일괄 반영 대상" checked>
                 ${isStudent ? `<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', false)">일시 저장</button>` : ''}
                 ${state.currentUser.role !== 'student' ? `<button class="btn btn-emerald" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', true)">진도 확정</button>` : ''}
               ` : `<span class="badge badge-emerald">원장/조교 검재 확정 완료</span>`}
@@ -3639,6 +3590,12 @@ function renderProgressTabContent(studentId) {
       <div class="card">
         <div class="card-title">🏆 ${escapeHTML(st.name)} 학생 당일 진도 및 완료 실적 기입 대장</div>
         ${resultRows}
+        ${plansToday.length > 0 && plansToday.some(p => !p.isConfirmed) ? `
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+             ${isStudent ? `<button class="btn btn-secondary" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(false)">💾 선택 항목 일괄 임시저장</button>` : ''}
+             ${state.currentUser.role !== 'student' ? `<button class="btn btn-emerald" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(true)">✅ 선택 항목 일괄 확정</button>` : ''}
+          </div>
+        ` : ''}
       </div>
     `;
   }
@@ -3659,22 +3616,30 @@ function renderConsultations() {
         ? `<span class="badge" style="background:#d1fae5; color:#065f46;">상담완료</span>`
         : `<span class="badge" style="background:#fee2e2; color:#b91c1c;">대기중</span>`;
       
-      const dateStr = new Date(cs.createdAt).toLocaleString('ko-KR');
+      const csName = cs.name || cs.studentName || "신청자";
+      const csField = cs.field || cs.type || "상담신청";
+      let dateDisplay = cs.requestDate || "";
+      if (cs.createdAt) {
+        try {
+          dateDisplay = new Date(cs.createdAt).toLocaleString('ko-KR');
+        } catch (e) {}
+      }
+      if (!dateDisplay) dateDisplay = "최근 접수";
       
       return `
         <div class="card" style="margin-bottom: 12px; border-left: 4px solid ${isCompleted ? '#10b981' : '#ef4444'};">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px;">
             <div style="display:flex; align-items:center; gap: 8px;">
-              <h3 style="margin:0; font-size: 16px;">${cs.name} 학생 <span style="font-size:13px; font-weight:400; color:var(--text-muted);">(${cs.grade})</span></h3>
+              <h3 style="margin:0; font-size: 16px;">${escapeHTML(csName)} 학생 <span style="font-size:13px; font-weight:400; color:var(--text-muted);">(${escapeHTML(cs.grade || '-')})</span></h3>
               ${statusBadge}
-              <span class="badge badge-emerald">${cs.field}</span>
+              <span class="badge badge-emerald">${escapeHTML(csField)}</span>
             </div>
-            <div style="font-size:12px; color:var(--text-muted);">${dateStr}</div>
+            <div style="font-size:12px; color:var(--text-muted);">${escapeHTML(dateDisplay)}</div>
           </div>
           
           <div style="display:flex; flex-direction:column; gap:6px; font-size:13px; color:var(--text-dark); margin-bottom: 12px;">
-            <div><strong>연락처:</strong> ${cs.phone}</div>
-            ${cs.memo ? `<div style="background:var(--bg-app); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-color);"><strong>[문의/참고사항]</strong><br>${cs.memo.replace(/\\n/g, '<br>')}</div>` : ''}
+            <div><strong>연락처:</strong> ${escapeHTML(cs.phone || '-')}</div>
+            ${cs.memo ? `<div style="background:var(--bg-app); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-color);"><strong>[문의/참고사항]</strong><br>${escapeHTML(cs.memo).replace(/\n/g, '<br>')}</div>` : ''}
           </div>
           
           <div style="display:flex; justify-content:flex-end;">
@@ -3690,8 +3655,8 @@ function renderConsultations() {
   container.innerHTML = `
     <div class="page-header">
       <div class="page-title">
-        <h1>상담 관리</h1>
-        <p>외부 홈페이지에서 접수된 상담 신청 내역을 관리합니다.</p>
+        <h1>상담 신청 내역 관리</h1>
+        <p>외부 홈페이지 및 시스템에서 접수된 상담 신청 내역을 관리합니다.</p>
       </div>
     </div>
     
@@ -3703,6 +3668,52 @@ function renderConsultations() {
   if (window.lucide) window.lucide.createIcons();
 }
 
+async function handleHomepageContactModal(field) {
+  const name = document.getElementById('modalContactName').value.trim();
+  const phone = document.getElementById('modalContactPhone').value.trim();
+  const grade = document.getElementById('modalContactGrade').value.trim();
+  if (!name || !phone || !grade) {
+    alert('학생 이름, 연락처, 학교 및 학년을 모두 입력해 주세요.');
+    return;
+  }
+  
+  const id = `cs-${Date.now()}`;
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const consultationData = {
+    id,
+    name: name,
+    studentName: name,
+    field: field,
+    type: field,
+    grade: grade,
+    phone: phone,
+    createdAt: now.toISOString(),
+    requestDate: dateStr,
+    status: '대기중'
+  };
+
+  // 상태 업데이트
+  if (!state.consultations) state.consultations = [];
+  state.consultations.unshift(consultationData);
+
+  // DB 저장 (비동기)
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from("agy_consultations").upsert([{ id: consultationData.id, data: consultationData }]);
+    } catch (e) {
+      console.error("상담 신청 DB 저장 실패:", e);
+    }
+  }
+
+  alert(name + ' 학생(' + grade + ')의 [' + field + '] 상담 신청이 성공적으로 접수되었습니다!\n원장님이 확인 후 기재해주신 연락처(' + phone + ')로 직접 전화 드리겠습니다. 감사합니다.');
+  closeModal();
+  
+  if (state.currentUser && state.currentUser.role === 'director' && state.currentView === 'consultations') {
+    renderConsultations();
+  }
+}
+
 async function handleConsultStatusChange(id) {
   const cs = state.consultations.find(c => c.id === id);
   if (!cs) return;
@@ -3710,9 +3721,9 @@ async function handleConsultStatusChange(id) {
   cs.status = cs.status === "상담완료" ? "대기중" : "상담완료";
   
   // DB 업데이트
-  if (window.supabaseClient) {
+  if (supabaseClient) {
     try {
-      await window.supabaseClient.from("agy_consultations").update({ data: cs }).eq("id", id);
+      await supabaseClient.from("agy_consultations").update({ data: cs }).eq("id", id);
     } catch (e) {
       console.error("상담 상태 업데이트 실패:", e);
     }
@@ -3955,6 +3966,94 @@ async function saveStudentResult(planId, makeConfirmed) {
   }
 }
 
+// --- 신규 일괄 처리 함수 ---
+async function bulkApprovePlans() {
+  const checkboxes = document.querySelectorAll('.plan-bulk-chk:checked');
+  if (checkboxes.length === 0) {
+    alert("일괄 승인할 계획을 먼저 선택해 주세요.");
+    return;
+  }
+  
+  if (!confirm(`선택한 ${checkboxes.length}개의 계획을 일괄 승인하시겠습니까?`)) return;
+  
+  const updates = [];
+  checkboxes.forEach(chk => {
+    const planId = chk.value;
+    const plan = state.dailyPlans.find(p => p.id === planId);
+    if (plan) {
+      plan.isPlanConfirmed = true;
+      updates.push({ id: plan.id, data: plan });
+    }
+  });
+  
+  if (!supabaseClient) {
+    alert("계획이 일괄 승인되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient.from("agy_daily_plans").upsert(updates);
+    if (!error) {
+      alert("선택 항목이 성공적으로 일괄 승인되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("일괄 승인 중 오류가 발생했습니다.");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.bulkApprovePlans = bulkApprovePlans;
+
+async function bulkSaveStudentResults(makeConfirmed) {
+  const checkboxes = document.querySelectorAll('.result-bulk-chk:checked');
+  if (checkboxes.length === 0) {
+    alert("일괄 반영할 실적을 먼저 선택해 주세요.");
+    return;
+  }
+  
+  const actionText = makeConfirmed ? "확정" : "임시저장";
+  if (!confirm(`선택한 ${checkboxes.length}개의 실적을 일괄 ${actionText} 하시겠습니까?`)) return;
+  
+  const updates = [];
+  checkboxes.forEach(chk => {
+    const planId = chk.value;
+    const plan = state.dailyPlans.find(p => p.id === planId);
+    if (plan) {
+      const start = document.getElementById(`realStart_${planId}`).value;
+      const end = document.getElementById(`realEnd_${planId}`).value;
+      const isCompleted = document.getElementById(`realComp_${planId}`).checked;
+      
+      plan.actualStartTime = start;
+      plan.actualEndTime = end;
+      plan.isCompleted = isCompleted;
+      plan.isConfirmed = makeConfirmed;
+      updates.push({ id: plan.id, data: plan });
+    }
+  });
+  
+  if (!supabaseClient) {
+    alert(`실적이 일괄 ${actionText} 되었습니다. (오프라인 모드)`);
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient.from("agy_daily_plans").upsert(updates);
+    if (!error) {
+      alert(`선택 항목이 성공적으로 일괄 ${actionText} 되었습니다.`);
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("일괄 반영 중 오류가 발생했습니다.");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.bulkSaveStudentResults = bulkSaveStudentResults;
 
 // --- 10. 글로벌 모달 팝업 컨트롤러 ---
 function openModal(htmlContent) {
@@ -4070,17 +4169,6 @@ function openConsultationModal(field) {
   });
 }
 
-function handleHomepageContactModal(field) {
-  const name = document.getElementById('modalContactName').value.trim();
-  const phone = document.getElementById('modalContactPhone').value.trim();
-  const grade = document.getElementById('modalContactGrade').value.trim();
-  if (!name || !phone || !grade) {
-    alert('학생 이름, 연락처, 학교 및 학년을 모두 입력해 주세요.');
-    return;
-  }
-  alert(name + ' 학생(' + grade + ')의 [' + field + '] 상담 신청이 성공적으로 접수되었습니다!\n원장님이 확인 후 기재해주신 연락처(' + phone + ')로 직접 전화 드리겠습니다. 감사합니다.');
-  closeModal();
-}
 
 function getHomepageHTML(isPublic) {
   return `
