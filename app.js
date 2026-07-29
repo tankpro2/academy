@@ -479,7 +479,16 @@ function renderSidebarMenu() {
 }
 
 // 8. 라우팅 네비게이션
-function navigate(viewKey) {
+async function navigate(viewKey) {
+  // 메뉴 전환 시 항상 서버로부터 최신 데이터를 불러와 동기화
+  if (typeof loadAllData === 'function') {
+    try {
+      await loadAllData();
+    } catch (e) {
+      console.error("Data load error during navigation:", e);
+    }
+  }
+
   state.currentView = viewKey;
   
   // 사이드바 활성화 갱신
@@ -3289,6 +3298,7 @@ window.handleSaveEnrollment = handleSaveEnrollment;
 
 // --- ⑥ 진도 관리 뷰 ---
 let progressTab = "plan"; // plan: 당일계획수립, result: 당일실적등록, stats: 진도이력조회
+let progressSelectedStudentId = ""; // 원장/강사가 진도관리에서 선택한 학생 유지용 변수
 
 // 학생 계획수립 모드 진입 처리 (대기화면 → 실제 계획 입력화면)
 function enterStudentPlanMode() {
@@ -3300,20 +3310,26 @@ window.enterStudentPlanMode = enterStudentPlanMode;
 function renderProgress() {
   const container = document.getElementById("mainContent");
   
-  // 로그인 학생인 경우 타겟 자동 고정
-  let progressStudentId = "";
+  // 로그인 학생인 경우 타겟 자동 고정, 그 외에는 선택된 ID 유지
   if (state.currentUser.role === 'student') {
-    progressStudentId = state.currentUser.ref_id;
-  } else if (state.students.length > 0) {
-    progressStudentId = state.students[0].id;
+    progressSelectedStudentId = state.currentUser.ref_id;
+  } else if (!progressSelectedStudentId && state.students.length > 0) {
+    progressSelectedStudentId = state.students[0].id;
   }
+  
+  if (state.currentUser.role !== 'student' && progressSelectedStudentId && !state.students.some(s => s.id === progressSelectedStudentId)) {
+    progressSelectedStudentId = state.students.length > 0 ? state.students[0].id : "";
+  }
+  
+  const progressStudentId = progressSelectedStudentId;
 
   // 진도관리 대기화면 조건 확인 (학생 계정일 때만 첫 진입 시 표출)
   const isStudent = state.currentUser && state.currentUser.role === 'student';
 
-  // 출석(확정) 여부 체크 (진도관리 접근 제한)
+  // 출석(확정) 또는 수강 시간표 등록 여부 체크 (진도관리 접근 제한)
   const hasAttendance = state.attendance.some(a => a.studentId === progressStudentId && a.date === state.selectedDate);
-  if (isStudent && !hasAttendance) {
+  const hasEnrollment = state.enrollments.some(e => e.studentId === progressStudentId && e.date === state.selectedDate);
+  if (isStudent && !hasAttendance && !hasEnrollment) {
     container.innerHTML = `
       <div style="padding:60px; text-align:center; margin-top:20px; color:var(--text-muted);">
         <i data-lucide="alert-circle" style="width:64px; height:64px; color:var(--accent-red); margin-bottom:16px;"></i>
@@ -3429,6 +3445,7 @@ function toggleProgressTab(tab) {
 }
 
 function changeProgressStudent(stId) {
+  progressSelectedStudentId = stId;
   renderProgressTabContent(stId);
 }
 
@@ -3446,10 +3463,11 @@ function renderProgressTabContent(studentId) {
     return;
   }
 
-  // 출석 체크 로직 (학생 계정인 경우만 미출석 시 접근 제한, 원장/강사는 바로 조회 및 승인 가능)
+  // 출석 또는 수강 시간표 등록 여부 체크 (학생 계정인 경우만 미출석/미등록 시 접근 제한, 원장/강사는 바로 조회 및 승인 가능)
   const isStudentRole = state.currentUser && state.currentUser.role === 'student';
   const hasAttendance = state.attendance.some(a => a.studentId === studentId && a.date === state.selectedDate);
-  if (isStudentRole && !hasAttendance) {
+  const hasEnrollment = state.enrollments.some(e => e.studentId === studentId && e.date === state.selectedDate);
+  if (isStudentRole && !hasAttendance && !hasEnrollment) {
     target.innerHTML = `
       <div class="card" style="text-align:center; padding:40px; margin-top:20px; color:var(--text-muted);">
         <i data-lucide="alert-circle" style="width:48px; height:48px; margin:0 auto 12px; color:var(--accent-red)"></i>
@@ -3470,26 +3488,60 @@ function renderProgressTabContent(studentId) {
     let planInputs = "";
     // 이미 등록된 계획이 있는 경우 리스트 표출
     if (plansToday.length > 0) {
-      planInputs = plansToday.map((p, idx) => `
-        <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
-          ${state.currentUser.role !== 'student' && !p.isPlanConfirmed ? `<input type="checkbox" class="plan-bulk-chk" value="${p.id}" style="width:16px; height:16px; cursor:pointer;" checked>` : ''}
-          <span style="font-weight:700; width:30px;">#${idx + 1}</span>
-          <input type="text" value="${escapeHTML(p.activityName)}" disabled style="flex:2; padding:8px;">
-          <input type="time" value="${p.plannedStartTime}" disabled style="flex:1; padding:8px;">
-          <input type="time" value="${p.plannedEndTime}" disabled style="flex:1; padding:8px;">
-          <span style="font-size:12px; font-weight:700; width:70px; text-align:center;">${p.plannedDuration}분</span>
-          
-          ${p.isPlanConfirmed 
-            ? `<span class="badge badge-emerald">계획확정</span>` 
-            : `
-              ${state.currentUser.role !== 'student' 
-                ? `<button class="btn btn-emerald" style="padding:4px 8px; font-size:11px;" onclick="approvePlan('${p.id}')">승인</button>` 
-                : `<span class="badge badge-gray">승인대기</span>`
+      planInputs = plansToday.map((p, idx) => {
+        if (state.currentUser.role === 'student') {
+          return `
+            <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+              <span style="font-weight:700; width:30px;">#${idx + 1}</span>
+              ${p.isPlanConfirmed 
+                ? `
+                  <input type="text" value="${escapeHTML(p.activityName)}" disabled style="flex:2; padding:8px;">
+                  <input type="time" value="${p.plannedStartTime}" disabled style="flex:1; padding:8px;">
+                  <input type="time" value="${p.plannedEndTime}" disabled style="flex:1; padding:8px;">
+                ` 
+                : `
+                  <input type="text" id="edit_actName_${p.id}" value="${escapeHTML(p.activityName)}" style="flex:2; padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+                  ${makeTimeSelectHTML('edit_actStart_' + p.id, p.plannedStartTime, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
+                  ${makeTimeSelectHTML('edit_actEnd_' + p.id, p.plannedEndTime, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
+                `
               }
-            `
-          }
-        </div>
-      `).join("");
+              <span style="font-size:12px; font-weight:700; width:70px; text-align:center;">${p.plannedDuration}분</span>
+              
+              <div style="display:flex; gap:6px; align-items:center;">
+                ${p.isPlanConfirmed 
+                  ? `<span class="badge badge-emerald">계획확정</span>` 
+                  : `
+                    <span class="badge badge-gray">승인대기</span>
+                    <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; border:1px solid var(--border-color);" onclick="updatePlanDetails('${p.id}')">수정저장</button>
+                  `
+                }
+              </div>
+            </div>
+          `;
+        } else {
+          return `
+            <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+              ${!p.isPlanConfirmed ? `<input type="checkbox" class="plan-bulk-chk" value="${p.id}" style="width:16px; height:16px; cursor:pointer;" checked>` : '<div style="width:16px;"></div>'}
+              <span style="font-weight:700; width:30px;">#${idx + 1}</span>
+              <input type="text" id="edit_actName_${p.id}" value="${escapeHTML(p.activityName)}" style="flex:2; padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+              ${makeTimeSelectHTML('edit_actStart_' + p.id, p.plannedStartTime, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
+              ${makeTimeSelectHTML('edit_actEnd_' + p.id, p.plannedEndTime, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
+              
+              <div style="display:flex; gap:6px; align-items:center;">
+                <button class="btn btn-secondary" style="padding:6px 10px; font-size:11px; border:1px solid var(--border-color);" onclick="updatePlanDetails('${p.id}')">수정저장</button>
+                
+                ${p.isPlanConfirmed 
+                  ? `
+                    <span class="badge badge-emerald">계획확정</span>
+                    <button class="btn btn-secondary" style="padding:6px 10px; font-size:11px; color:var(--accent-red); border:1px solid var(--accent-red);" onclick="cancelApprovePlan('${p.id}')">승인취소</button>
+                  ` 
+                  : `<button class="btn btn-emerald" style="padding:6px 10px; font-size:11px; background:var(--accent-gold); color:#3d1a00; border:none;" onclick="approvePlan('${p.id}')">승인대기</button>`
+                }
+              </div>
+            </div>
+          `;
+        }
+      }).join("");
     } else {
       // 신규 입력 폼: 기본 10개 입력 줄 보이기 + 미완료 항목 prefill
       const lastUncompleted = findLastUncompletedPlans(studentId);
@@ -3519,22 +3571,28 @@ function renderProgressTabContent(studentId) {
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
               * 학생은 등원하자마자 계획을 작성해 제출하며, 강사나 원장의 [계획확정 승인]을 득한 후 실행합니다. (기본 10줄 제공, 미완료 자동 이월)
             </p>
-            <div id="planFormRows">
-              ${planInputs}
-            </div>
-            
-            <div style="display:flex; gap:12px; margin-top:20px;">
-              <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
-                <i data-lucide="plus-circle"></i> [+ 계획 추가]
-              </button>
-              <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
-              ${state.currentUser.role !== 'student' && plansToday.length > 0 ? `<button class="btn btn-emerald" style="flex:2; justify-content:center; background:#047857;" onclick="bulkApprovePlans()">✅ 선택 항목 일괄 승인</button>` : ''}
-            </div>
-          ` : `
-            <div id="planFormRows">
-              ${planInputs}
-            </div>
-          `}
+          ` : ''}
+          <div id="planFormRows">
+            ${planInputs}
+          </div>
+          
+          ${(plansToday.length === 0 || plansToday.some(p => !p.isPlanConfirmed)) ? `
+            ${isStudent ? `
+              <div style="display:flex; gap:12px; margin-top:20px;">
+                <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
+                  <i data-lucide="plus-circle"></i> [+ 계획 추가]
+                </button>
+                <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
+              </div>
+            ` : `
+              <div style="display:flex; gap:12px; margin-top:20px;">
+                <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
+                  <i data-lucide="plus-circle"></i> [+ 계획 추가]
+                </button>
+                <button class="btn btn-emerald" style="flex:2; justify-content:center; background:var(--accent-gold); color:#3d1a00; font-weight:bold;" onclick="confirmProgressPlans('${studentId}')">계획 확정</button>
+              </div>
+            `}
+          ` : ''}
         </div>
       </div>
     `;
@@ -3901,6 +3959,305 @@ async function submitDailyPlans(studentId) {
     console.error(err);
   }
 }
+
+// 원장/강사가 학생의 계획을 직접 작성하여 즉시 확정
+async function confirmDailyPlansDirectly(studentId) {
+  const plans = [];
+  
+  for (let idx = 0; idx < 20; idx++) {
+    const elName = document.getElementById(`actName_${idx}`);
+    if (!elName) continue;
+    
+    const name = elName.value.trim();
+    if (name === "") continue;
+    
+    const start = document.getElementById(`actStart_${idx}`).value;
+    const end = document.getElementById(`actEnd_${idx}`).value;
+    
+    if (!start || !end) {
+      alert("계획의 시작 시간과 종료 시간을 모두 입력해 주세요.");
+      return;
+    }
+    
+    const id = `pl-${studentId}-${state.selectedDate}-${idx}`;
+    const planRecord = {
+      id,
+      studentId,
+      date: state.selectedDate,
+      activityName: name,
+      plannedStartTime: start,
+      plannedEndTime: end,
+      plannedDuration: calculateMinutes(start, end),
+      actualStartTime: "",
+      actualEndTime: "",
+      isCompleted: false,
+      isConfirmed: false,
+      isPlanConfirmed: true
+    };
+    
+    plans.push({ id, data: planRecord });
+  }
+  
+  if (plans.length === 0) {
+    alert("활동명을 1개 이상 입력해 주세요.");
+    return;
+  }
+  
+  const overlapError = checkTimeOverlaps(plans);
+  if (overlapError) {
+    alert(overlapError);
+    return;
+  }
+  
+  if (!supabaseClient) {
+    plans.forEach(p => {
+      const existIdx = state.dailyPlans.findIndex(o => o.id === p.id);
+      if (existIdx !== -1) {
+        state.dailyPlans[existIdx] = p.data;
+      } else {
+        state.dailyPlans.push(p.data);
+      }
+    });
+    alert("오늘의 학습 계획이 즉시 확정 등록되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient.from("agy_daily_plans").insert(plans);
+    if (!error) {
+      alert("오늘의 학습 계획이 성공적으로 즉시 확정 등록되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("확정 등록 실패");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.confirmDailyPlansDirectly = confirmDailyPlansDirectly;
+
+// 원장/강사가 학생이 제출한 대기 상태 계획들을 일괄 확정
+async function confirmSubmittedPlans(studentId) {
+  const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate && !p.isPlanConfirmed);
+  if (plansToday.length === 0) {
+    alert("확정할 대기 중인 계획이 없습니다.");
+    return;
+  }
+  
+  if (!confirm(`대기 중인 계획 ${plansToday.length}개를 모두 확정하시겠습니까?`)) return;
+  
+  const updates = [];
+  plansToday.forEach(plan => {
+    plan.isPlanConfirmed = true;
+    updates.push({ id: plan.id, data: plan });
+  });
+  
+  if (!supabaseClient) {
+    alert("계획이 즉시 확정되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient.from("agy_daily_plans").upsert(updates);
+    if (!error) {
+      alert("제출된 계획들이 정상적으로 확정되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("계획 확정 중 오류가 발생했습니다.");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.confirmSubmittedPlans = confirmSubmittedPlans;
+
+// 원장/강사가 계획 상세 내용(활동명, 시간)을 수정하고 저장
+async function updatePlanDetails(planId) {
+  const name = document.getElementById(`edit_actName_${planId}`).value.trim();
+  const start = document.getElementById(`edit_actStart_${planId}`).value;
+  const end = document.getElementById(`edit_actEnd_${planId}`).value;
+  
+  if (name === "") {
+    alert("활동명을 입력해 주세요.");
+    return;
+  }
+  
+  if (!start || !end) {
+    alert("시작 시간과 종료 시간을 모두 입력해 주세요.");
+    return;
+  }
+  
+  const plan = state.dailyPlans.find(p => p.id === planId);
+  if (!plan) return;
+  
+  plan.activityName = name;
+  plan.plannedStartTime = start;
+  plan.plannedEndTime = end;
+  plan.plannedDuration = calculateMinutes(start, end);
+  
+  if (!supabaseClient) {
+    alert("계획 수정사항이 임시 저장되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_daily_plans")
+      .update({ data: plan })
+      .eq("id", planId);
+      
+    if (!error) {
+      alert("계획 수정사항이 저장되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("저장 실패");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.updatePlanDetails = updatePlanDetails;
+
+// 원장/강사가 특정 계획의 승인을 취소 (승인대기 상태로 환원)
+async function cancelApprovePlan(planId) {
+  const plan = state.dailyPlans.find(p => p.id === planId);
+  if (!plan) return;
+  
+  plan.isPlanConfirmed = false;
+  
+  if (!supabaseClient) {
+    alert("계획 승인이 취소되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_daily_plans")
+      .update({ data: plan })
+      .eq("id", planId);
+      
+    if (!error) {
+      alert("계획 승인이 취소되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("승인 취소 실패");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.cancelApprovePlan = cancelApprovePlan;
+
+// 원장/강사가 학생의 unconfirmed 계획 및 신규 추가한 입력란의 계획들을 통합 일괄 확정
+async function confirmProgressPlans(studentId) {
+  // 1. 기존 제출된 미확정 계획 확정
+  const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate && !p.isPlanConfirmed);
+  const updates = [];
+  plansToday.forEach(plan => {
+    plan.isPlanConfirmed = true;
+    updates.push({ id: plan.id, data: plan });
+  });
+  
+  // 2. 신규 추가된 입력란의 계획들 확정용으로 수집
+  const newPlans = [];
+  for (let idx = 0; idx < 20; idx++) {
+    const elName = document.getElementById(`actName_${idx}`);
+    if (!elName) continue;
+    
+    const name = elName.value.trim();
+    if (name === "") continue;
+    
+    const start = document.getElementById(`actStart_${idx}`).value;
+    const end = document.getElementById(`actEnd_${idx}`).value;
+    
+    if (!start || !end) {
+      alert("추가된 계획의 시작 시간과 종료 시간을 모두 입력해 주세요.");
+      return;
+    }
+    
+    const id = `pl-${studentId}-${state.selectedDate}-${idx}`;
+    const planRecord = {
+      id,
+      studentId,
+      date: state.selectedDate,
+      activityName: name,
+      plannedStartTime: start,
+      plannedEndTime: end,
+      plannedDuration: calculateMinutes(start, end),
+      actualStartTime: "",
+      actualEndTime: "",
+      isCompleted: false,
+      isConfirmed: false,
+      isPlanConfirmed: true // 즉시 확정
+    };
+    
+    newPlans.push({ id, data: planRecord });
+  }
+  
+  if (updates.length === 0 && newPlans.length === 0) {
+    alert("확정할 계획이나 신규 입력된 계획이 없습니다.");
+    return;
+  }
+  
+  if (newPlans.length > 0) {
+    const overlapError = checkTimeOverlaps(newPlans);
+    if (overlapError) {
+      alert(overlapError);
+      return;
+    }
+  }
+  
+  if (!confirm("모든 계획을 확정하시겠습니까?")) return;
+  
+  if (!supabaseClient) {
+    updates.forEach(upd => {
+      const existIdx = state.dailyPlans.findIndex(o => o.id === upd.id);
+      if (existIdx !== -1) state.dailyPlans[existIdx] = upd.data;
+    });
+    newPlans.forEach(p => {
+      const existIdx = state.dailyPlans.findIndex(o => o.id === p.id);
+      if (existIdx !== -1) {
+        state.dailyPlans[existIdx] = p.data;
+      } else {
+        state.dailyPlans.push(p.data);
+      }
+    });
+    alert("계획이 즉시 확정되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const promises = [];
+    if (updates.length > 0) {
+      promises.push(supabaseClient.from("agy_daily_plans").upsert(updates));
+    }
+    if (newPlans.length > 0) {
+      promises.push(supabaseClient.from("agy_daily_plans").insert(newPlans));
+    }
+    
+    const results = await Promise.all(promises);
+    const hasError = results.some(r => r.error);
+    if (!hasError) {
+      alert("모든 계획이 정상적으로 확정되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("계획 확정 중 오류가 발생했습니다.");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.confirmProgressPlans = confirmProgressPlans;
 
 // 원장/조교 계획 승인
 async function approvePlan(planId) {
