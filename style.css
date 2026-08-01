@@ -1594,3 +1594,159 @@ table.yuju-table tr:hover td {
     -webkit-overflow-scrolling: touch !important;
   }
 }
+
+
+/* ==============================================================================
+   전체 시스템 (대시보드, 학생관리, 수강관리, 진도관리, 근무일지 등) 모바일 스마트폰 완벽 대응
+   ============================================================================== */
+@media (max-width: 768px) {
+
+  /* 1. 메인 앱 프레임 레이아웃 (사이드바 & 탑바) */
+  .app-container {
+    flex-direction: column !important;
+    min-height: 100vh;
+  }
+
+  .header {
+    padding: 10px 14px !important;
+    height: auto !important;
+    min-height: 56px;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: space-between !important;
+  }
+  .header .user-profile {
+    font-size: 12px !important;
+    gap: 6px !important;
+  }
+
+  /* 사이드바 메뉴 -> 모바일 가로 터치 스크롤 패널로 개편 */
+  .sidebar {
+    width: 100% !important;
+    min-width: 100% !important;
+    padding: 8px 12px !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    background: #ffffff !important;
+    position: sticky;
+    top: 0;
+    z-index: 990;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+  }
+  .sidebar-header {
+    display: none !important; /* 모바일에서는 공간 절약을 위해 사이드바 헤더 숨김 */
+  }
+  .sidebar-menu {
+    display: flex !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    gap: 6px !important;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidebar-menu::-webkit-scrollbar {
+    height: 3px;
+  }
+  .sidebar-menu .menu-item {
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 6px 12px !important;
+    font-size: 12.5px !important;
+    border-radius: 20px !important;
+    background: var(--bg-app);
+    color: var(--text-dark);
+    flex-shrink: 0;
+  }
+  .sidebar-menu .menu-item.active {
+    background: var(--primary-color) !important;
+    color: #ffffff !important;
+  }
+
+  /* 메인 콘텐츠 구역 패딩 */
+  .main-content {
+    padding: 14px 12px !important;
+    width: 100% !important;
+  }
+
+  /* 2. 페이지 헤더 & 액션 바 */
+  .page-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+    margin-bottom: 16px !important;
+  }
+  .page-title h1 {
+    font-size: 20px !important;
+  }
+  .page-title p {
+    font-size: 12px !important;
+  }
+  .action-bar {
+    width: 100% !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+  .action-bar button, .action-bar select, .action-bar input {
+    flex: 1 1 auto;
+    font-size: 13px !important;
+    padding: 8px 12px !important;
+  }
+
+  /* 3. 카드 및 그리드 시스템 모바일 1열화 */
+  .card {
+    padding: 14px !important;
+    margin-bottom: 14px !important;
+    border-radius: var(--radius-md) !important;
+  }
+  .cards-grid, .stats-grid, .filter-grid, .form-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  /* 4. 테이블 반응형 터치 스크롤 & 폰트 세밀화 */
+  .yuju-table {
+    font-size: 12.5px !important;
+    min-width: 600px; /* 테이블 내용 뭉개짐 방지 */
+  }
+  .yuju-table th, .yuju-table td {
+    padding: 8px 10px !important;
+  }
+
+  /* 5. 진도 관리 및 실적 등록 모바일 세부폼 최적화 */
+  .progress-plan-row {
+    flex-direction: column !alignment: flex-start !important;
+    gap: 8px !important;
+  }
+
+  /* 6. 모달 팝업 반응형 터치 오버레이 */
+  .modal-content {
+    width: 95% !important;
+    max-width: 95% !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+    padding: 18px 14px !important;
+    border-radius: var(--radius-lg) !important;
+  }
+  .modal-body {
+    padding: 10px 0 !important;
+  }
+  .modal-footer {
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+  .modal-footer button {
+    width: 100% !important;
+  }
+
+  /* 7. 폼 그룹 요소들 100% 너비 */
+  .form-group {
+    width: 100% !important;
+    margin-bottom: 10px !important;
+  }
+  .form-group input, .form-group select, .form-group textarea {
+    font-size: 13.5px !important;
+    padding: 9px 11px !important;
+  }
+}
