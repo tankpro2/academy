@@ -142,17 +142,192 @@
     </div>
   </div>
 
-  <!-- 1-2. 퍼블릭 학원 소개 홈페이지 화면 -->
-  <div id="publicHomepageScreen" class="public-homepage-overlay" style="display: block;">
+  <!-- 1-1. 스마트폰 최적화 신규 메인 랜딩 화면 (모바일 전용 첫 화면) -->
+  <div id="mobileLandingScreen" class="mobile-landing-overlay" style="display: block;">
+    <!-- 모바일 상단 헤더 바 -->
+    <nav class="mobile-nav">
+      <div class="mobile-logo-area">
+        <i data-lucide="graduation-cap" class="mobile-logo-icon"></i>
+        <div class="mobile-logo-text">
+          <span class="brand-title">대치리드인 & 유주코칭</span>
+          <span class="brand-sub">국어학원 · 진로진학연구소</span>
+        </div>
+      </div>
+      <button class="btn-pc-toggle" onclick="openPublicHomepage()">
+        <i data-lucide="monitor"></i> PC화면으로 보기
+      </button>
+    </nav>
+
+    <!-- 모바일 메인 컨테이너 (480px 최적화) -->
+    <div class="mobile-container">
+
+      <!-- 1) 학원 소개 메인 히어로 카운트 -->
+      <section class="mobile-card mobile-hero">
+        <div class="hero-badge">✨ 교육경력 25년 이상 + 유주코칭 프리미엄 명품 학습코칭</div>
+        <h1 class="hero-title">뇌과학 기반 우뇌좌뇌 통합 독서독해 & 1:1 맞춤 진로진학 컨설팅</h1>
+        <p class="hero-desc">
+          단순 주입식 교육을 넘어 학생의 독서독해 문해력을 과학적으로 트레이닝하고, 1:1 심층 상담으로 최적의 대입 합격 전략을 설계합니다.
+        </p>
+
+        <div class="hero-features">
+          <div class="feature-item">
+            <i data-lucide="check-circle-2" class="icon-emerald"></i>
+            <span><strong>특허받은 독서진단</strong> & 수준별 1:1 맞춤 독서 코칭</span>
+          </div>
+          <div class="feature-item">
+            <i data-lucide="check-circle-2" class="icon-emerald"></i>
+            <span><strong>초·중·고 국어 완벽 대비</strong> (독해력·수능·내신·논술)</span>
+          </div>
+          <div class="feature-item">
+            <i data-lucide="check-circle-2" class="icon-gold"></i>
+            <span><strong>1:1 학습유형 분석</strong> & 수시·정시 대입 전략 컨설팅</span>
+          </div>
+        </div>
+
+        <div class="mobile-contact-box">
+          <div class="contact-row">
+            <i data-lucide="phone-call"></i>
+            <div>
+              <strong>상담 대표 번호:</strong>
+              <a href="tel:010-4055-0756" class="contact-link">010-4055-0756 (문자전용)</a>
+            </div>
+          </div>
+          <div class="contact-row">
+            <i data-lucide="map-pin"></i>
+            <div>
+              <strong>국어학원:</strong> 도곡로93길 9, 3층 (피아이 어학원 앞)
+            </div>
+          </div>
+          <div class="contact-row">
+            <i data-lucide="map-pin"></i>
+            <div>
+              <strong>상담교습소:</strong> 대치동 938-8 1층 (롯데문화센터 옆)
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2) 두 개의 블로그 소개 및 바로가기 -->
+      <section class="mobile-section">
+        <h2 class="section-title">
+          <i data-lucide="bookmark"></i> 공식 네이버 블로그 안내
+        </h2>
+        <div class="blog-cards-grid">
+          
+          <!-- 블로그 1: 대치리드인 유주코칭국어학원 -->
+          <div class="mobile-card blog-card">
+            <div class="blog-card-header">
+              <span class="badge badge-emerald">독서 & 국어 전문</span>
+              <i data-lucide="book-open" class="blog-icon emerald"></i>
+            </div>
+            <h3 class="blog-title">대치리드인 유주코칭국어학원</h3>
+            <p class="blog-desc">
+              수준별 독서 코칭, 리드인 독서 진단, 독해력 훈련법,<br>학원 소식 및 국어 학습 노하우를 확인하세요.
+            </p>
+            <a href="https://blog.naver.com/tankpro11" target="_blank" class="blog-link-btn btn-emerald">
+              <i data-lucide="external-link"></i> 국어학원 블로그 바로가기
+            </a>
+          </div>
+
+          <!-- 블로그 2: 유주코칭 진로진학 학습법연구소 -->
+          <div class="mobile-card blog-card">
+            <div class="blog-card-header">
+              <span class="badge badge-gold">진로 & 진학 컨설팅</span>
+              <i data-lucide="compass" class="blog-icon gold"></i>
+            </div>
+            <h3 class="blog-title">유주코칭 진로진학 학습법연구소</h3>
+            <p class="blog-desc">
+              1:1 학습 성향 분석, 대입 수시/정시 원서 지도,<br>생활기록부 & 수행평가 맞춤 가이드 정보를 공유합니다.
+            </p>
+            <a href="https://blog.naver.com/ujucoach" target="_blank" class="blog-link-btn btn-gold">
+              <i data-lucide="external-link"></i> 진로진학 블로그 바로가기
+            </a>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 3) 학원 & 교습소 하나로 통합된 단일 상담 신청 폼 -->
+      <section class="mobile-card consult-section">
+        <div class="consult-header">
+          <span class="badge badge-primary"><i data-lucide="send"></i> 1:1 통합 상담</span>
+          <h2 class="consult-title">학원 & 교습소 통합 상담 신청</h2>
+          <p class="consult-sub">학원(국어/독서)과 교습소(진로진학) 상담을 한번에 신청하세요. 원장님이 직접 안내해 드립니다.</p>
+        </div>
+
+        <form id="mobileUnifiedConsultForm" onsubmit="handleUnifiedConsultation(event)" class="mobile-form">
+          <div class="form-group">
+            <label for="mContactName">학생 이름 <span class="req">*</span></label>
+            <input type="text" id="mContactName" placeholder="학생 이름을 입력하세요" required>
+          </div>
+
+          <div class="form-group">
+            <label for="mContactPhone">학부모 연락처 <span class="req">*</span></label>
+            <input type="tel" id="mContactPhone" placeholder="연락처 (예: 010-1234-5678)" required>
+          </div>
+
+          <div class="form-group">
+            <label for="mContactGrade">학교 및 학년 <span class="req">*</span></label>
+            <input type="text" id="mContactGrade" placeholder="예: 대치초 4학년 / 단대부고 1학년" required>
+          </div>
+
+          <div class="form-group">
+            <label for="mContactField">상담 희망 분야</label>
+            <select id="mContactField">
+              <option value="학원/교습소 통합상담">학원 & 교습소 통합 상담 (추천)</option>
+              <option value="국어/독서코칭">대치리드인 국어·독서 코칭</option>
+              <option value="진로진학컨설팅">유주코칭 진로진학·학습법 컨설팅</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="mContactMemo">문의 및 참고사항</label>
+            <textarea id="mContactMemo" placeholder="학생의 현재 독서 습관, 국어 성적, 관심 학과 등 참고사항을 적어주세요."></textarea>
+          </div>
+
+          <button type="submit" class="btn-submit-consult">
+            <i data-lucide="check-circle"></i> 상담 신청 완료하기
+          </button>
+        </form>
+      </section>
+
+      <!-- 4) PC화면으로 보기 이동 배너 -->
+      <section class="pc-view-banner-section">
+        <button onclick="openPublicHomepage()" class="btn-pc-view-large">
+          <i data-lucide="monitor"></i>
+          <div>
+            <span class="main-text">PC화면으로 보기</span>
+            <span class="sub-text">데스크톱 환경에 최적화된 기존 첫 화면으로 이동합니다</span>
+          </div>
+          <i data-lucide="chevron-right" class="arrow-icon"></i>
+        </button>
+      </section>
+
+      <!-- 하단 카피라이트 -->
+      <footer class="mobile-footer">
+        <p>© 대치리드인 유주코칭 국어학원 & 진로진학 학습법연구소</p>
+        <p>상담문의: 010-4055-0756 | 대치동 학원가 위치</p>
+      </footer>
+
+    </div>
+  </div>
+
+  <!-- 1-2. 퍼블릭 학원 소개 홈페이지 화면 (PC 화면) -->
+  <div id="publicHomepageScreen" class="public-homepage-overlay" style="display: none;">
     <nav class="homepage-nav" style="display:flex; justify-content:space-between; align-items:center; padding: 12px 28px; background: white; border-bottom: 1px solid var(--border-color); position:sticky; top:0; z-index:1000;">
       <div class="logo-area" style="display:flex; align-items:center; gap:8px; font-family: var(--font-title); font-weight:800; font-size:22px; color: var(--primary-color);">
         <i data-lucide="graduation-cap" style="width:28px; height:28px;"></i>
         <span style="font-weight:900; font-size: 20px;">대치리드인 유주코칭 국어학원</span>
       </div>
 
-      <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:700; background-color: var(--text-dark); color: white; border:none; padding:10px 20px; border-radius:30px; cursor:pointer;">
-        <i data-lucide="lock" style="width:16px; height:16px;"></i> 학원관리 시스템 로그인
-      </button>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button class="btn" onclick="openMobileLanding()" style="display: flex; align-items: center; gap: 6px; font-weight:700; background-color: var(--primary-light); color: var(--primary-color); border:1px solid var(--primary-color); padding:8px 16px; border-radius:30px; cursor:pointer; font-size:13px;">
+          <i data-lucide="smartphone" style="width:16px; height:16px;"></i> 📱 첫화면(모바일 전용 화면)으로 가기
+        </button>
+        <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:700; background-color: var(--text-dark); color: white; border:none; padding:10px 20px; border-radius:30px; cursor:pointer;">
+          <i data-lucide="lock" style="width:16px; height:16px;"></i> 학원관리 시스템 로그인
+        </button>
+      </div>
     </nav>
     
     <div class="homepage-container one-screen" id="about" style="display:flex; flex-direction:column; gap:16px; padding: 16px 28px;">
@@ -160,7 +335,7 @@
       <section class="hero-section compact-top" style="background: linear-gradient(135deg, rgba(19, 92, 57, 0.9) 0%, rgba(13, 70, 42, 0.95) 100%), url('ivory_tower.jpg') no-repeat center center; background-size: cover; padding: 28px 32px; border-radius: var(--radius-lg); color: white; display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; align-items: center; box-shadow: var(--shadow-lg);">
         <div>
           <span style="display: inline-block; padding: 3px 10px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 12px; font-weight: 700; color: #fcd34d; margin-bottom: 10px; letter-spacing:0.5px;">
-            ✨ 교육경력 25년 이상의 검증된 프리미엄 명품 학습코칭
+            ✨ 교육경력 25년 이상 + 유주코칭 프리미엄 명품 학습코칭
           </span>
           <h1 style="color:white; margin:0 0 10px 0; font-family: var(--font-title); font-size: 23px; font-weight:900; line-height:1.4; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
             뇌과학까지 고려한 우뇌좌뇌 통합형 학습법으로<br>극상위권 도약의 꿈을 이루다

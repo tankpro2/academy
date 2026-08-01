@@ -1750,3 +1750,452 @@ table.yuju-table tr:hover td {
     padding: 9px 11px !important;
   }
 }
+
+/* ==========================================
+   모바일 최적화 랜딩 화면 전용 스타일 (mobileLandingScreen)
+   ========================================== */
+.mobile-landing-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg-app);
+  overflow-y: auto;
+  z-index: 9999;
+}
+
+.mobile-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+.mobile-logo-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mobile-logo-icon {
+  width: 26px;
+  height: 26px;
+  color: var(--primary-color);
+}
+
+.mobile-logo-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-logo-text .brand-title {
+  font-family: var(--font-title);
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--primary-color);
+  line-height: 1.2;
+}
+
+.mobile-logo-text .brand-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.btn-pc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 20px;
+  color: var(--text-dark);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-pc-toggle:hover {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.btn-pc-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mobile-container {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px 14px 40px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mobile-card {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-md);
+}
+
+.mobile-hero {
+  background: linear-gradient(135deg, rgba(19, 92, 57, 0.96) 0%, rgba(13, 70, 42, 0.98) 100%), url('ivory_tower.jpg') no-repeat center center;
+  background-size: cover;
+  color: white;
+  border: none;
+}
+
+.hero-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fcd34d;
+  margin-bottom: 12px;
+}
+
+.hero-title {
+  font-family: var(--font-title);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.45;
+  color: white !important;
+  margin-bottom: 10px;
+}
+
+.hero-desc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 16px;
+}
+
+.hero-features {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--accent-gold);
+}
+
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.feature-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.icon-emerald { color: #34d399; }
+.icon-gold { color: #fcd34d; }
+
+.mobile-contact-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 12px;
+}
+
+.contact-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.contact-row svg {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  color: #fcd34d;
+  flex-shrink: 0;
+}
+
+.contact-link {
+  color: #fcd34d;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.mobile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-dark);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.section-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--primary-color);
+}
+
+.blog-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.blog-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.blog-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.blog-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.blog-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.blog-icon.emerald { color: var(--primary-color); }
+.blog-icon.gold { color: var(--accent-gold); }
+
+.blog-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-dark);
+  margin: 0;
+}
+
+.blog-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.blog-link-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 11px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  margin-top: 4px;
+  transition: opacity 0.2s;
+}
+
+.blog-link-btn:hover {
+  opacity: 0.9;
+}
+
+.blog-link-btn.btn-emerald {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.blog-link-btn.btn-gold {
+  background-color: var(--accent-gold);
+  color: var(--text-dark);
+}
+
+.blog-link-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.consult-section {
+  border-top: 3px solid var(--primary-color);
+}
+
+.consult-header {
+  margin-bottom: 16px;
+}
+
+.consult-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-dark);
+  margin: 6px 0 4px 0;
+}
+
+.consult-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.mobile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobile-form .form-group {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobile-form label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-dark);
+}
+
+.mobile-form label .req {
+  color: var(--accent-red);
+}
+
+.mobile-form input, .mobile-form select, .mobile-form textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  background: white;
+}
+
+.mobile-form input:focus, .mobile-form select:focus, .mobile-form textarea:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(19, 92, 57, 0.12);
+}
+
+.mobile-form textarea {
+  height: 75px;
+  resize: none;
+}
+
+.btn-submit-consult {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 13px;
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  margin-top: 6px;
+  box-shadow: 0 4px 10px rgba(19, 92, 57, 0.25);
+  transition: all 0.2s ease;
+}
+
+.btn-submit-consult:hover {
+  background-color: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.btn-submit-consult svg {
+  width: 18px;
+  height: 18px;
+}
+
+.pc-view-banner-section {
+  margin-top: 4px;
+}
+
+.btn-pc-view-large {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 18px;
+  background: white;
+  border: 2px dashed var(--primary-color);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.btn-pc-view-large:hover {
+  background: var(--primary-light);
+  transform: translateY(-1px);
+}
+
+.btn-pc-view-large > svg:first-child {
+  width: 24px;
+  height: 24px;
+  color: var(--primary-color);
+  flex-shrink: 0;
+}
+
+.btn-pc-view-large .main-text {
+  display: block;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--primary-color);
+}
+
+.btn-pc-view-large .sub-text {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.btn-pc-view-large .arrow-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--primary-color);
+  margin-left: auto;
+}
+
+.mobile-footer {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 10px 0;
+  line-height: 1.6;
+}

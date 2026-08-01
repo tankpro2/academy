@@ -5124,8 +5124,19 @@ function renderHomepage() {
   bindConsultButtons(container);
 }
 
+function openMobileLanding() {
+  document.getElementById("loginScreen").style.display = "none";
+  const pcScreen = document.getElementById("publicHomepageScreen");
+  if (pcScreen) pcScreen.style.display = "none";
+  const mobileScreen = document.getElementById("mobileLandingScreen");
+  if (mobileScreen) mobileScreen.style.display = "block";
+  if (window.lucide) window.lucide.createIcons();
+}
+
 function openPublicHomepage() {
   document.getElementById("loginScreen").style.display = "none";
+  const mobileScreen = document.getElementById("mobileLandingScreen");
+  if (mobileScreen) mobileScreen.style.display = "none";
   const screen = document.getElementById("publicHomepageScreen");
   screen.style.display = "block";
   screen.innerHTML = getHomepageHTML(true);
@@ -5145,6 +5156,8 @@ function bindConsultButtons(root) {
 window.bindConsultButtons = bindConsultButtons;
 
 function closePublicHomepage() {
+  const mobileScreen = document.getElementById("mobileLandingScreen");
+  if (mobileScreen) mobileScreen.style.display = "none";
   document.getElementById("publicHomepageScreen").style.display = "none";
   document.getElementById("loginScreen").style.display = "flex";
   // 로그인 카드와 폼 리셋
@@ -5152,6 +5165,55 @@ function closePublicHomepage() {
   document.getElementById("changePwCard").style.display = "none";
   document.getElementById("loginUsername").value = "";
   document.getElementById("loginPassword").value = "";
+}
+
+async function handleUnifiedConsultation(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const nameEl = document.getElementById("mContactName");
+  const phoneEl = document.getElementById("mContactPhone");
+  const gradeEl = document.getElementById("mContactGrade");
+  const fieldEl = document.getElementById("mContactField");
+  const memoEl = document.getElementById("mContactMemo");
+
+  const name = nameEl ? nameEl.value.trim() : "";
+  const phone = phoneEl ? phoneEl.value.trim() : "";
+  const grade = gradeEl ? gradeEl.value.trim() : "미입력";
+  const field = fieldEl ? fieldEl.value.trim() : "학원/교습소 통합상담";
+  const memo = memoEl ? memoEl.value.trim() : "";
+
+  if (!name || !phone) {
+    alert("학생 이름과 학부모 연락처를 모두 입력해 주세요.");
+    return;
+  }
+
+  const id = `cs-${Date.now()}`;
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const consultationData = {
+    id,
+    name: name,
+    studentName: name,
+    field: field,
+    type: field,
+    grade: grade,
+    phone: phone,
+    memo: memo ? `[모바일 통합상담] ${memo}` : '[모바일 통합상담] 학원/교습소 1:1 상담 신청',
+    createdAt: now.toISOString(),
+    requestDate: dateStr,
+    status: '대기중'
+  };
+
+  await saveConsultationRecord(consultationData);
+
+  alert(`${name} 학생의 [${field}] 1:1 통합 상담 신청이 정상적으로 접수되었습니다!\n원장님이 내용을 검토한 후 입력하신 연락처(${phone})로 신속히 안내해 드리겠습니다. 감사합니다.`);
+  
+  if (event && event.target && event.target.reset) {
+    event.target.reset();
+  }
+
+  if (state.currentUser && state.currentUser.role === 'director' && state.currentView === 'consultations') {
+    renderConsultations();
+  }
 }
 
 async function handleHomepageContact(event) {
@@ -5244,9 +5306,14 @@ function getHomepageHTML(isPublic) {
           <span style="font-weight:900; font-size: 20px;">대치리드인 유주코칭 국어학원</span>
         </div>
 
-        <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:700; background-color: var(--text-dark); color: white; border:none; padding:10px 20px; border-radius:30px; cursor:pointer;">
-          <i data-lucide="lock" style="width:16px; height:16px;"></i> 학원관리 시스템 로그인
-        </button>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <button class="btn" onclick="openMobileLanding()" style="display: flex; align-items: center; gap: 6px; font-weight:700; background-color: var(--primary-light); color: var(--primary-color); border:1px solid var(--primary-color); padding:8px 16px; border-radius:30px; cursor:pointer; font-size:13px;">
+            <i data-lucide="smartphone" style="width:16px; height:16px;"></i> 📱 첫화면(모바일 전용 화면)으로 가기
+          </button>
+          <button class="btn btn-emerald" onclick="closePublicHomepage()" style="display: flex; align-items: center; gap: 8px; font-weight:700; background-color: var(--text-dark); color: white; border:none; padding:10px 20px; border-radius:30px; cursor:pointer;">
+            <i data-lucide="lock" style="width:16px; height:16px;"></i> 학원관리 시스템 로그인
+          </button>
+        </div>
       </nav>
     ` : ''}
     
@@ -5255,7 +5322,7 @@ function getHomepageHTML(isPublic) {
       <section class="hero-section compact-top" style="background: linear-gradient(135deg, rgba(19, 92, 57, 0.9) 0%, rgba(13, 70, 42, 0.95) 100%), url('ivory_tower.jpg') no-repeat center center; background-size: cover; padding: 28px 32px; border-radius: var(--radius-lg); color: white; display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; align-items: center; box-shadow: var(--shadow-lg);">
         <div>
           <span style="display: inline-block; padding: 3px 10px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 12px; font-weight: 700; color: #fcd34d; margin-bottom: 10px; letter-spacing:0.5px;">
-            ✨ 교육경력 25년 이상의 검증된 프리미엄 명품 학습코칭
+            ✨ 교육경력 25년 이상 + 유주코칭 프리미엄 명품 학습코칭
           </span>
           <h1 style="color:white; margin:0 0 10px 0; font-family: var(--font-title); font-size: 23px; font-weight:900; line-height:1.4; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
             뇌과학까지 고려한 우뇌좌뇌 통합형 학습법으로<br>극상위권 도약의 꿈을 이루다
@@ -5345,8 +5412,10 @@ function getHomepageHTML(isPublic) {
 
 // 글로벌 노출
 window.renderHomepage = renderHomepage;
+window.openMobileLanding = openMobileLanding;
 window.openPublicHomepage = openPublicHomepage;
 window.closePublicHomepage = closePublicHomepage;
+window.handleUnifiedConsultation = handleUnifiedConsultation;
 window.handleHomepageContact = handleHomepageContact;
 window.openConsultationModal = openConsultationModal;
 window.handleHomepageContactModal = handleHomepageContactModal;
