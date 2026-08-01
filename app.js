@@ -234,8 +234,8 @@ async function loadAllData() {
     state.enrollments = (resEnrollments.data || []).map(r => r.data);
     state.attendance = (resAttendance.data || []).map(r => r.data);
     state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
-    state.notices = (resNotices.data || []).map(r => r.data);
-    state.consultations = (resConsultations.data || []).map(r => r.data);
+    state.notices = (resNotices.data || []).map(r => r.data || r).filter(Boolean);
+    state.consultations = (resConsultations.data || []).map(r => r.data || r).filter(Boolean);
     if ((!state.consultations || state.consultations.length === 0) && window.mockData && window.mockData.consultations) {
       state.consultations = window.mockData.consultations;
     }
@@ -251,9 +251,21 @@ async function loadAllData() {
   }
 }
 
+// 로그인 실패 횟수 및 락아웃(Brute-Force 차단) 제어 변수
+let loginFailures = 0;
+let loginLockoutUntil = 0;
+
 // 6. 로그인 / 비밀번호 변경 로직
 async function handleLoginSubmit(event) {
   event.preventDefault();
+
+  const now = Date.now();
+  if (now < loginLockoutUntil) {
+    const remainingSec = Math.ceil((loginLockoutUntil - now) / 1000);
+    alert(`로그인 시도가 5회 이상 실패하여 접속이 제한된 상태입니다.\n약 ${remainingSec}초 후에 다시 시도해 주세요.`);
+    return;
+  }
+
   const usernameInput = document.getElementById("loginUsername").value.trim();
   const passwordInput = document.getElementById("loginPassword").value.trim();
   
@@ -265,10 +277,18 @@ async function handleLoginSubmit(event) {
       return;
     }
     if (user.password !== passwordInput) {
-      alert("비밀번호가 올바르지 않습니다. (오프라인 모드)");
+      loginFailures++;
+      if (loginFailures >= 5) {
+        loginLockoutUntil = Date.now() + 5 * 60 * 1000;
+        loginFailures = 0;
+        alert("비밀번호를 5회 연속 잘못 입력하여 5분간 로그인이 제한됩니다.");
+        return;
+      }
+      alert(`비밀번호가 올바르지 않습니다. (오류 ${loginFailures}/5회)`);
       return;
     }
-    state.currentUser = user;
+    loginFailures = 0;
+    state.currentUser = { ...user };
     
     if (user.password === "1234" && !user.is_password_changed) {
       document.getElementById("loginCard").style.display = "none";
@@ -294,12 +314,20 @@ async function handleLoginSubmit(event) {
     }
     
     if (user.password !== passwordInput) {
-      alert("비밀번호가 올바르지 않습니다.");
+      loginFailures++;
+      if (loginFailures >= 5) {
+        loginLockoutUntil = Date.now() + 5 * 60 * 1000;
+        loginFailures = 0;
+        alert("비밀번호를 5회 연속 잘못 입력하여 5분간 로그인이 제한됩니다.");
+        return;
+      }
+      alert(`비밀번호가 올바르지 않습니다. (오류 ${loginFailures}/5회)`);
       return;
     }
     
     // 로그인 성공 시
-    state.currentUser = user;
+    loginFailures = 0;
+    state.currentUser = { ...user };
     
     // 만약 비밀번호가 초기값 '1234' 이거나 아직 변경한 적이 없는 경우 -> 강제 변경 카드 노출
     if (user.password === "1234" && !user.is_password_changed) {
@@ -317,10 +345,17 @@ async function handleLoginSubmit(event) {
 }
 
 function completeLoginSession() {
-  try {
-    localStorage.setItem("yuju_logged_user", JSON.stringify(state.currentUser));
-  } catch (e) {
-    console.warn("localStorage is not available:", e);
+  if (state.currentUser) {
+    // 보안: 메모리 및 localStorage 저장 시 비밀번호(password) 평문 필드 완전 삭제
+    const safeUser = { ...state.currentUser };
+    delete safeUser.password;
+    
+    try {
+      localStorage.setItem("yuju_logged_user", JSON.stringify(safeUser));
+    } catch (e) {
+      console.warn("localStorage is not available:", e);
+    }
+    delete state.currentUser.password;
   }
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("appScreen").style.display = "flex";
@@ -4171,11 +4206,19 @@ function renderConsultations() {
   const container = document.getElementById("mainContent");
   if (!state.consultations) state.consultations = [];
   
+  // 유효한 객체만 정렬 (최신순)
+  const validConsultations = state.consultations.filter(c => c && typeof c === 'object');
+  validConsultations.sort((a, b) => {
+    const da = a.createdAt || a.requestDate || '';
+    const db = b.createdAt || b.requestDate || '';
+    return db.localeCompare(da);
+  });
+  
   let listHTML = "";
-  if (state.consultations.length === 0) {
+  if (validConsultations.length === 0) {
     listHTML = `<div style="text-align:center; padding: 40px; color: var(--text-muted);">현재 접수된 상담 신청 내역이 없습니다.</div>`;
   } else {
-    listHTML = state.consultations.map(cs => {
+    listHTML = validConsultations.map(cs => {
       const isCompleted = cs.status === "상담완료";
       const statusBadge = isCompleted 
         ? `<span class="badge" style="background:#d1fae5; color:#065f46;">상담완료</span>`
@@ -4237,6 +4280,9 @@ async function handleHomepageContactModal(field) {
   const name = document.getElementById('modalContactName').value.trim();
   const phone = document.getElementById('modalContactPhone').value.trim();
   const grade = document.getElementById('modalContactGrade').value.trim();
+  const memoEl = document.getElementById('modalContactMemo');
+  const memo = memoEl ? memoEl.value.trim() : '';
+
   if (!name || !phone || !grade) {
     alert('학생 이름, 연락처, 학교 및 학년을 모두 입력해 주세요.');
     return;
@@ -4253,6 +4299,7 @@ async function handleHomepageContactModal(field) {
     type: field,
     grade: grade,
     phone: phone,
+    memo: memo,
     createdAt: now.toISOString(),
     requestDate: dateStr,
     status: '대기중'
@@ -5059,14 +5106,55 @@ function closePublicHomepage() {
   document.getElementById("loginPassword").value = "";
 }
 
-function handleHomepageContact(event) {
-  event.preventDefault();
-  const name = document.getElementById("contactName").value;
-  const phone = document.getElementById("contactPhone").value;
-  const field = document.getElementById("contactField").value;
+async function handleHomepageContact(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const nameEl = document.getElementById("contactName");
+  const phoneEl = document.getElementById("contactPhone");
+  const fieldEl = document.getElementById("contactField");
   
-  alert(`${name} 학생의 [${field}] 간편 상담 신청이 접수되었습니다.\n학원에서 내용을 검토한 후 입력하신 연락처(${phone})로 신속하게 안내해 드리겠습니다. 감사합니다!`);
-  event.target.reset();
+  const name = nameEl ? nameEl.value.trim() : "";
+  const phone = phoneEl ? phoneEl.value.trim() : "";
+  const field = fieldEl ? fieldEl.value.trim() : "간편상담";
+  
+  if (!name || !phone) {
+    alert('학생 이름과 연락처를 모두 입력해 주세요.');
+    return;
+  }
+
+  const id = `cs-${Date.now()}`;
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const consultationData = {
+    id,
+    name: name,
+    studentName: name,
+    field: field,
+    type: field,
+    grade: '미입력',
+    phone: phone,
+    memo: '홈페이지 메인 간편 상담 신청',
+    createdAt: now.toISOString(),
+    requestDate: dateStr,
+    status: '대기중'
+  };
+
+  if (!state.consultations) state.consultations = [];
+  state.consultations.unshift(consultationData);
+
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from("agy_consultations").upsert([{ id: consultationData.id, data: consultationData }]);
+    } catch (e) {
+      console.error("간편 상담 신청 DB 저장 실패:", e);
+    }
+  }
+
+  alert(`${name} 학생의 [${field}] 간편 상담 신청이 성공적으로 접수되었습니다.\n학원에서 내용을 검토한 후 입력하신 연락처(${phone})로 신속하게 안내해 드리겠습니다. 감사합니다!`);
+  if (event && event.target && event.target.reset) event.target.reset();
+
+  if (state.currentUser && state.currentUser.role === 'director' && state.currentView === 'consultations') {
+    renderConsultations();
+  }
 }
 
 function openConsultationModal(field) {
