@@ -1490,3 +1490,107 @@ table.yuju-table tr:hover td {
 
 
 
+
+
+/* ==============================================================================
+   모바일 스마트폰 전용 미디어 쿼리 (Responsive Mobile Optimization for <= 768px)
+   ============================================================================== */
+@media (max-width: 768px) {
+  /* 1. 기본 레이아웃 & 패딩 조절 */
+  body {
+    font-size: 14px;
+  }
+
+  .homepage-container {
+    padding: 12px 14px !important;
+    gap: 14px !important;
+  }
+
+  /* 2. 네비게이션 상단 바 모바일 대응 */
+  .homepage-nav {
+    padding: 10px 14px !important;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .homepage-nav .logo-area {
+    font-size: 17px !important;
+  }
+  .homepage-nav .logo-area span {
+    font-size: 16px !important;
+  }
+  .homepage-nav button {
+    padding: 8px 14px !important;
+    font-size: 12px !important;
+  }
+
+  /* 3. 영웅(Hero) 섹션 1열 수직 배치 */
+  .hero-section {
+    grid-template-columns: 1fr !important;
+    padding: 20px 18px !important;
+    gap: 16px !important;
+  }
+  .hero-section h1 {
+    font-size: 19px !important;
+    line-height: 1.45 !important;
+  }
+  .hero-section p {
+    font-size: 12.5px !important;
+  }
+
+  /* 4. 프로그램 카드리스트 1열 배치 */
+  .cards-row {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+  }
+  .homepage-card {
+    padding: 16px 18px !important;
+  }
+  .homepage-card h2 {
+    font-size: 16px !important;
+  }
+
+  /* 5. 앱 메인 화면 사이드바 & 컨텐츠 1열 정렬 */
+  .app-container {
+    flex-direction: column !important;
+  }
+  .sidebar {
+    width: 100% !important;
+    min-width: 100% !important;
+    padding: 14px !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-color) !important;
+  }
+  .sidebar-menu {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+  .sidebar-menu .menu-item {
+    font-size: 12px !important;
+    padding: 8px 12px !important;
+  }
+  .main-content {
+    padding: 16px 14px !important;
+  }
+
+  /* 6. 모달 팝업 모바일 터치 패널 대응 */
+  .modal-content, .login-card {
+    width: 94% !important;
+    max-width: 94% !important;
+    padding: 22px 18px !important;
+    margin: 10px auto !important;
+  }
+
+  /* 7. 대시보드 및 카드리드 모바일 반응형 */
+  .dashboard-grid, .cards-grid {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+  }
+
+  /* 8. 포괄적 테이블 가로 스크롤 강화 */
+  .table-responsive {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+}
