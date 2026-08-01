@@ -126,9 +126,6 @@ async function initializeApp() {
     // 퍼블릭 홈페이지 표출
     openPublicHomepage();
   }
-  
-  // 접속 시 원장님 생신 축하 팝업 자동 발동
-  setTimeout(showBirthdayPopup, 300);
 }
 
 // 한국어 역할 표시 변환 헬퍼
@@ -456,13 +453,15 @@ function renderSidebarMenu() {
   // 전체 메뉴 풀리스트 정의
   const allMenus = [
     { key: "dashboard", label: "대시보드", icon: "layout-dashboard", roles: ["director", "teacher", "assistant", "student"] },
-    { key: "operations", label: "운영 관리", icon: "calendar-range", roles: ["director"] },
+    { key: "operations", label: "운영 관리", icon: "calendar-range", roles: ["director", "teacher", "assistant"] },
     { key: "consultations", label: "상담 신청 내역", icon: "message-square", roles: ["director"] },
     { key: "students", label: "학생 관리", icon: "users", roles: ["director", "teacher", "assistant"] },
-    { key: "teachers", label: "강사 관리", icon: "graduation-cap", roles: ["director", "teacher"] },
+    { key: "teachers", label: "강사 관리", icon: "graduation-cap", roles: ["director"] },
     { key: "enrollments", label: "수강 관리(시간표)", icon: "calendar-days", roles: ["director", "teacher", "assistant"] },
     { key: "studentEnrollments", label: "학생별 시간표", icon: "user-check", roles: ["director", "teacher", "assistant", "student"] },
-    { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant", "student"] }
+    { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant", "student"] },
+    { key: "teacherLog", label: "근무 일지 작성", icon: "clock", roles: ["teacher"] },
+    { key: "teacherLogApproval", label: "강사 출퇴근 결재", icon: "badge-check", roles: ["director", "assistant"] }
   ];
   
   allMenus.forEach(menu => {
@@ -522,6 +521,12 @@ async function navigate(viewKey) {
       break;
     case "progress":
       renderProgress();
+      break;
+    case "teacherLog":
+      renderTeacherLogView();
+      break;
+    case "teacherLogApproval":
+      renderTeacherLogApprovalView();
       break;
   }
 }
@@ -675,7 +680,7 @@ async function handleNewNotice(event) {
 }
 
 // --- ② 운영 관리 뷰 (원장 전용) ---
-let opsYearMonth = "2026-07"; // 기본 연월
+let opsYearMonth = new Date().toISOString().slice(0, 7); // 오늘 날짜 기준 기본 연월 (예: "2026-08")
 
 function renderOperations() {
   const container = document.getElementById("mainContent");
@@ -732,13 +737,21 @@ function renderOperations() {
         <h1>학원 운영 관리</h1>
         <p>선택하신 월의 가동 시간 및 휴무일을 날짜별로 구성합니다.</p>
       </div>
-      <div class="action-bar" style="flex-wrap:wrap; gap:8px;">
+      <div class="action-bar" style="flex-wrap:wrap; gap:8px; align-items:center;">
         <select id="opsMonthSelector" onchange="changeOpsMonth(this.value)" style="padding:10px 14px; border-radius:var(--radius-md); border:1px solid var(--border-color); font-weight:700;">
           <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
           <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
           <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
           <option value="2026-10" ${opsYearMonth === '2026-10' ? 'selected' : ''}>2026년 10월</option>
+          <option value="2026-11" ${opsYearMonth === '2026-11' ? 'selected' : ''}>2026년 11월</option>
+          <option value="2026-12" ${opsYearMonth === '2026-12' ? 'selected' : ''}>2026년 12월</option>
         </select>
+        
+        <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+          <span style="font-size:12px; font-weight:700; color:var(--text-dark);">수강신청 허용 (해당 월 전체 학생):</span>
+          <input type="checkbox" id="allowOpsEnrollmentToggle" onchange="toggleMonthlyEnrollmentAccess(this.checked)" style="width:18px; height:18px; cursor:pointer;" ${monthData.allowEnrollment ? 'checked' : ''}>
+        </div>
+
         <button class="btn btn-secondary" onclick="applyWeeklyTemplate()"><i data-lucide="copy"></i> 주간 템플릿 적용</button>
         <button class="btn btn-emerald" onclick="saveOperationsConfig()"><i data-lucide="save"></i> 확정 저장</button>
       </div>
@@ -1059,6 +1072,33 @@ async function saveOperationsConfig() {
     console.error(err);
   }
 }
+
+// 월별 수강신청 허용 체크박스 상태 변경 처리 (DB 즉시 저장 및 동기화)
+async function toggleMonthlyEnrollmentAccess(checked) {
+  if (!state.monthlyOperations[opsYearMonth]) {
+    state.monthlyOperations[opsYearMonth] = {};
+  }
+  state.monthlyOperations[opsYearMonth].allowEnrollment = checked;
+  
+  const configs = state.monthlyOperations[opsYearMonth];
+  try {
+    const { error } = await supabaseClient
+      .from("agy_monthly_operations")
+      .upsert([{ year_month: opsYearMonth, configs }]);
+      
+    if (!error) {
+      alert(`해당 월(${opsYearMonth})의 전체 학생 수강신청이 ${checked ? '허용' : '차단'} 상태로 성공적으로 변경 및 저장되었습니다.`);
+      await loadAllData();
+      renderOperations();
+    } else {
+      alert("DB 저장 실패");
+    }
+  } catch (err) {
+    console.error(err);
+    alert("오류 발생: " + err.message);
+  }
+}
+window.toggleMonthlyEnrollmentAccess = toggleMonthlyEnrollmentAccess;
 
 // --- ③ 학생 관리 뷰 ---
 let studentTab = "list"; // list: 등록관리, attendance: 출결관리
@@ -1922,6 +1962,7 @@ function renderTeacherPlan() {
   const [year, month] = opsYearMonth.split("-").map(Number);
   const firstDayIndex = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
+  const monthOps = state.monthlyOperations[opsYearMonth] || {};
 
   let calendarCells = "";
   for (let i = 0; i < firstDayIndex; i++) {
@@ -1930,30 +1971,54 @@ function renderTeacherPlan() {
   for (let d = 1; d <= daysInMonth; d++) {
     const curDateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     
+    // 운영 관리 일정에서 해당 날짜 정보 조회
+    const op = monthOps[curDateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
+    const isHoliday = op.isHoliday;
+
     // date가 일치하는 스케줄만 필터링 (과거 dayOfWeek 데이터는 무시됨)
     const daySchedules = state.teacherSchedules.filter(sch => sch.date === curDateStr);
     
-    let tcBadges = daySchedules.map(sch => {
-      const tc = state.teachers.find(t => t.id === sch.teacherId);
-      if (!tc) return "";
-      return `<div style="font-size:11px; background:rgba(19,92,57,0.08); color:var(--primary-color); border:1px solid rgba(19,92,57,0.2); border-radius:4px; padding:3px 6px; margin-top:4px; font-weight:700; display:flex; justify-content:space-between; align-items:center;">
-        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">👩‍🏫 ${escapeHTML(tc.name)} <span style="font-size:10px; font-weight:600; opacity:0.85;">(${sch.startTime}~${sch.endTime})</span></span>
-        <button class="btn btn-danger" style="padding:1px 4px; font-size:10px; border-radius:2px; margin-left:4px;" onclick="event.stopPropagation(); deleteTeacherSchedule('${sch.id}')">&times;</button>
-      </div>`;
-    }).join("");
-
-    if (tcBadges === "") {
-      tcBadges = `<span style="font-size:10px; color:var(--text-muted); display:block; margin-top:4px;">-</span>`;
+    let tcBadges = "";
+    if (isHoliday) {
+      // 휴무일: 강사 배지 없이 휴무 표시
+      tcBadges = `<span style="font-size:10px; color:#b91c1c; font-weight:700; display:block; margin-top:4px;">🚫 휴무일</span>`;
+    } else {
+      // 운영일: 운영시간 표시
+      tcBadges = `<span style="font-size:10px; color:#059669; font-weight:600; display:block; margin-top:2px;">⏰ ${op.start}~${op.end}</span>`;
+      if (daySchedules.length > 0) {
+        tcBadges += daySchedules.map(sch => {
+          const tc = state.teachers.find(t => t.id === sch.teacherId);
+          if (!tc) return "";
+          return `<div style="font-size:11px; background:rgba(19,92,57,0.08); color:var(--primary-color); border:1px solid rgba(19,92,57,0.2); border-radius:4px; padding:3px 6px; margin-top:4px; font-weight:700; display:flex; justify-content:space-between; align-items:center;">
+            <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">👩‍🏫 ${escapeHTML(tc.name)} <span style="font-size:10px; font-weight:600; opacity:0.85;">(${sch.startTime}~${sch.endTime})</span></span>
+            <button class="btn btn-danger" style="padding:1px 4px; font-size:10px; border-radius:2px; margin-left:4px;" onclick="event.stopPropagation(); deleteTeacherSchedule('${sch.id}')">&times;</button>
+          </div>`;
+        }).join("");
+      } else {
+        tcBadges += `<span style="font-size:10px; color:var(--text-muted); display:block; margin-top:2px;">- 미배정</span>`;
+      }
     }
 
-    calendarCells += `
-      <div class="calendar-cell operating" style="min-height:100px; align-items:flex-start; justify-content:flex-start; text-align:left; padding:8px; cursor:pointer;" onclick="openNewScheduleModal('${curDateStr}')">
-        <span class="day-num" style="font-weight:800; font-size:12px;">${d}</span>
-        <div style="width:100%; margin-top:2px;">
-          ${tcBadges}
+    if (isHoliday) {
+      // 휴무일: 클릭 불가, 흐린 배경
+      calendarCells += `
+        <div class="calendar-cell closed holiday" style="min-height:100px; align-items:flex-start; justify-content:flex-start; text-align:left; padding:8px; cursor:not-allowed; background:#fef2f2; border-color:#fecaca;" title="휴무일 - 근무 등록 불가">
+          <span class="day-num" style="font-weight:800; font-size:12px; color:#b91c1c; text-decoration:line-through; opacity:0.7;">${d}</span>
+          <div style="width:100%; margin-top:2px;">
+            ${tcBadges}
+          </div>
         </div>
-      </div>
-    `;
+      `;
+    } else {
+      calendarCells += `
+        <div class="calendar-cell operating" style="min-height:100px; align-items:flex-start; justify-content:flex-start; text-align:left; padding:8px; cursor:pointer;" onclick="openNewScheduleModal('${curDateStr}', '${op.start}', '${op.end}')">
+          <span class="day-num" style="font-weight:800; font-size:12px;">${d}</span>
+          <div style="width:100%; margin-top:2px;">
+            ${tcBadges}
+          </div>
+        </div>
+      `;
+    }
   }
 
   target.innerHTML = `
@@ -1966,6 +2031,10 @@ function renderTeacherPlan() {
           <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
           <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
         </select>
+      </div>
+      <div style="display:flex; gap:16px; margin-bottom:12px; font-size:12px; align-items:center;">
+        <span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:12px; height:12px; background:#d1fae5; border:1px solid #6ee7b7; border-radius:2px; display:inline-block;"></span> 운영일 (근무 등록 가능)</span>
+        <span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:12px; height:12px; background:#fef2f2; border:1px solid #fecaca; border-radius:2px; display:inline-block;"></span> 휴무일 (근무 등록 불가)</span>
       </div>
 
       <div class="calendar-grid">
@@ -1983,7 +2052,10 @@ function renderTeacherPlan() {
   if (window.lucide) window.lucide.createIcons();
 }
 
-function openNewScheduleModal(dateStr) {
+
+function openNewScheduleModal(dateStr, opStart, opEnd) {
+  const defaultStart = opStart || "13:00";
+  const defaultEnd = opEnd || "22:00";
   const options = state.teachers.map(t => `<option value="${t.id}">${escapeHTML(t.name)}</option>`).join("");
   
   openModal(`
@@ -1997,14 +2069,17 @@ function openNewScheduleModal(dateStr) {
         <select id="schTeacherId">${options}</select>
       </div>
       <input type="hidden" id="schDate" value="${dateStr}">
+      <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:8px 12px; margin-bottom:12px; font-size:12px; color:#1e40af;">
+        📋 이날 학원 운영 시간: <strong>${defaultStart} ~ ${defaultEnd}</strong>
+      </div>
       <div style="display:flex; gap:12px;">
         <div class="form-group" style="flex:1;">
           <label>출근 계획시간</label>
-          <input type="time" id="schStart" step="600" value="13:00" onchange="alignToTenMinutes(this)">
+          <input type="time" id="schStart" step="600" value="${defaultStart}" onchange="alignToTenMinutes(this)">
         </div>
         <div class="form-group" style="flex:1;">
           <label>퇴근 계획시간</label>
-          <input type="time" id="schEnd" step="600" value="22:00" onchange="alignToTenMinutes(this)">
+          <input type="time" id="schEnd" step="600" value="${defaultEnd}" onchange="alignToTenMinutes(this)">
         </div>
       </div>
       <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">* 분 단위는 학원 표준인 10분 단위(예: 13:00, 13:10, 13:20)로 제어됩니다.</p>
@@ -2319,7 +2394,272 @@ async function saveTeacherLog(logId, makeConfirmed) {
 }
 
 
-// --- ⑤ 수강 관리 (시간표) 뷰 ---
+// ─────────────────────────────────────────────
+// 강사 전용 근무 일지 작성 뷰
+// ─────────────────────────────────────────────
+function renderTeacherLogView() {
+  const container = document.getElementById("mainContent");
+  const teacherId = state.currentUser.ref_id;
+  const teacher = state.teachers.find(t => t.id === teacherId);
+  if (!teacher) {
+    container.innerHTML = `<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">강사 정보를 찾을 수 없습니다.</div>`;
+    return;
+  }
+
+  // 이번 달 날짜 목록 중 근무 계획이 있는 날짜 목록
+  const monthOps = state.monthlyOperations[opsYearMonth] || {};
+  const [year, month] = opsYearMonth.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  // 강사의 해당 월 근무 계획 목록 (날짜 기반)
+  const schedulesThisMonth = state.teacherSchedules.filter(s => s.teacherId === teacherId && s.date && s.date.startsWith(opsYearMonth));
+
+  // 강사의 기제출 일지
+  const myLogs = state.teacherWorkLogs.filter(l => l.teacherId === teacherId);
+
+  // 달력 기반 카드 목록 생성
+  let logCards = "";
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const op = monthOps[dateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
+    if (op.isHoliday) continue; // 휴무일 제외
+
+    const planned = schedulesThisMonth.find(s => s.date === dateStr);
+    if (!planned) continue; // 근무 계획이 없는 날은 제외
+
+    const existLog = myLogs.find(l => l.date === dateStr);
+    const logId = existLog ? existLog.id : `wl-${teacherId}-${dateStr}`;
+
+    const isConfirmed = existLog?.isConfirmed || false;
+    const isSubmitted = !!existLog;
+
+    const statusBadge = isConfirmed
+      ? `<span class="badge badge-emerald">✅ 원장 결재 완료</span>`
+      : isSubmitted
+        ? `<span class="badge badge-primary" style="background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;font-weight:800;">📤 제출 완료 (결재 대기)</span>`
+        : `<span class="badge badge-gray" style="color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;font-weight:800;">미제출</span>`;
+
+    const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+    const dayLabel = dayNames[new Date(dateStr).getDay()];
+
+    logCards += `
+      <div class="card" style="margin-bottom:16px; padding:20px; border-left:4px solid ${isConfirmed ? '#059669' : isSubmitted ? '#3b82f6' : '#e5e7eb'};">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <span style="font-weight:800; font-size:16px;">${dateStr} (${dayLabel})</span>
+            <span style="margin-left:12px; font-size:12px; color:#059669; font-weight:700;">⏰ 계획: ${planned.startTime} ~ ${planned.endTime}</span>
+          </div>
+          <div>${statusBadge}</div>
+        </div>
+        ${isConfirmed ? `
+          <div style="font-size:13px; color:var(--text-muted);">
+            실제 출근: <strong>${existLog.actualStartTime}</strong> &nbsp;|&nbsp;
+            실제 퇴근: <strong>${existLog.actualEndTime}</strong> &nbsp;|&nbsp;
+            휴게: <strong>${existLog.breakMinutes || 0}분</strong>
+          </div>
+        ` : `
+          <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 출근시간</label>
+              <input type="time" id="logStart_${dateStr}" value="${existLog?.actualStartTime || planned.startTime}" style="padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 퇴근시간</label>
+              <input type="time" id="logEnd_${dateStr}" value="${existLog?.actualEndTime || planned.endTime}" style="padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">휴게시간(분)</label>
+              <input type="number" id="logBreak_${dateStr}" value="${existLog?.breakMinutes || 0}" min="0" step="10" style="width:80px; padding:8px; border:1px solid var(--border-color); border-radius:6px;">
+            </div>
+            <button class="btn btn-emerald" style="padding:8px 18px; font-weight:700;" onclick="submitTeacherLogEntry('${dateStr}', '${planned.startTime}', '${planned.endTime}')">
+              <i data-lucide="send"></i> ${isSubmitted ? '수정 제출' : '일지 제출'}
+            </button>
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  if (logCards === "") {
+    logCards = `<div style="text-align:center; padding:40px; color:var(--text-muted);">
+      이번 달 근무 계획이 없습니다. 원장님께 근무 계획 등록을 요청하세요.
+    </div>`;
+  }
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>근무 일지 작성</h1>
+        <p>원장이 등록한 근무 계획을 확인하고 실제 출퇴근 시간을 입력하여 제출합니다.</p>
+      </div>
+      <div class="action-bar">
+        <select onchange="changeOpsMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700;">
+          <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
+          <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
+          <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
+        </select>
+      </div>
+    </div>
+    <div class="card" style="background:var(--primary-light); border:1px solid rgba(5,150,105,0.2); margin-bottom:20px; padding:16px;">
+      <span style="font-weight:700; color:var(--primary-color);">👩‍🏫 ${escapeHTML(teacher.name)} 강사 | ${opsYearMonth} 근무 일지</span>
+      <span style="margin-left:16px; font-size:12px; color:var(--text-muted);">휴무일 및 근무 계획이 없는 날은 표시되지 않습니다.</span>
+    </div>
+    ${logCards}
+  `;
+  if (window.lucide) window.lucide.createIcons();
+}
+window.renderTeacherLogView = renderTeacherLogView;
+
+async function submitTeacherLogEntry(dateStr, planStart, planEnd) {
+  const actualStart = document.getElementById(`logStart_${dateStr}`)?.value;
+  const actualEnd = document.getElementById(`logEnd_${dateStr}`)?.value;
+  const breakMin = Number(document.getElementById(`logBreak_${dateStr}`)?.value || 0);
+
+  if (!actualStart || !actualEnd) {
+    alert("출근시간과 퇴근시간을 모두 입력해 주세요.");
+    return;
+  }
+
+  if (!confirm(`${dateStr} 근무 일지를 제출하시겠습니까?\n\n출근: ${actualStart} / 퇴근: ${actualEnd} / 휴게: ${breakMin}분`)) return;
+
+  const teacherId = state.currentUser.ref_id;
+  const id = `wl-${teacherId}-${dateStr}`;
+  const data = {
+    id, teacherId, date: dateStr,
+    planStartTime: planStart, planEndTime: planEnd,
+    actualStartTime: actualStart, actualEndTime: actualEnd,
+    breakMinutes: breakMin,
+    isSubmitted: true,
+    isConfirmed: false
+  };
+
+  try {
+    if (supabaseClient) {
+      await supabaseClient.from("agy_teacher_worklogs").upsert([{ id, data }]);
+    } else {
+      // 오프라인 모드: 로컬 state에 반영
+      const idx = state.teacherWorkLogs.findIndex(l => l.id === id);
+      if (idx >= 0) state.teacherWorkLogs[idx] = data;
+      else state.teacherWorkLogs.push(data);
+    }
+    alert("일지가 제출되었습니다. 원장님의 결재를 기다려 주세요.");
+    await loadAllData();
+    renderTeacherLogView();
+  } catch (err) {
+    console.error(err);
+    alert("제출 중 오류가 발생했습니다.");
+  }
+}
+window.submitTeacherLogEntry = submitTeacherLogEntry;
+
+// ─────────────────────────────────────────────
+// 원장/조교 전용 강사 출퇴근 결재 뷰
+// ─────────────────────────────────────────────
+function renderTeacherLogApprovalView() {
+  const container = document.getElementById("mainContent");
+
+  // 제출된(isSubmitted) 일지만 표시. 결재 대기 우선, 완료 나중
+  const allLogs = [...state.teacherWorkLogs]
+    .filter(l => l.isSubmitted || l.actualStartTime)
+    .sort((a, b) => {
+      if (a.isConfirmed !== b.isConfirmed) return a.isConfirmed ? 1 : -1;
+      return new Date(b.date) - new Date(a.date);
+    });
+
+  const rowsHTML = allLogs.map(log => {
+    const tc = state.teachers.find(t => t.id === log.teacherId);
+    if (!tc) return "";
+    const workMin = calculateMinutes(log.actualStartTime, log.actualEndTime);
+    const restMin = Number(log.breakMinutes || 0);
+    const netMin = Math.max(0, workMin - restMin);
+    const netH = Math.floor(netMin / 60);
+    const netM = netMin % 60;
+
+    const statusBadge = log.isConfirmed
+      ? `<span class="badge badge-emerald">✅ 결재 완료</span>`
+      : `<span class="badge badge-primary" style="background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;font-weight:800;">⏳ 결재 대기</span>`;
+
+    const approveBtn = !log.isConfirmed
+      ? `<button class="btn btn-emerald" style="padding:5px 12px; font-size:12px; font-weight:700;" onclick="approveTeacherLog('${log.id}')">✅ 결재 확정</button>`
+      : "";
+
+    return `
+      <tr style="${!log.isConfirmed ? 'background:#eff6ff;' : ''}">
+        <td><strong>${escapeHTML(tc.name)}</strong></td>
+        <td>${log.date}</td>
+        <td style="color:#059669; font-weight:700;">${log.planStartTime || '-'} ~ ${log.planEndTime || '-'}</td>
+        <td><strong>${log.actualStartTime || '-'}</strong></td>
+        <td><strong>${log.actualEndTime || '-'}</strong></td>
+        <td>${log.breakMinutes || 0}분</td>
+        <td><strong style="color:var(--primary-color);">${netH}시간 ${netM}분</strong></td>
+        <td>${statusBadge}</td>
+        <td>${approveBtn}</td>
+      </tr>
+    `;
+  }).join("");
+
+  const pendingCount = allLogs.filter(l => !l.isConfirmed).length;
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>강사 출퇴근 결재</h1>
+        <p>강사가 제출한 실제 출퇴근 일지를 확인하고 결재 확정합니다.</p>
+      </div>
+      ${pendingCount > 0 ? `<div class="action-bar"><span class="badge badge-primary" style="font-size:14px; padding:8px 16px; background:#dbeafe; color:#1e40af; border:1px solid #bfdbfe;">⏳ 결재 대기 ${pendingCount}건</span></div>` : ''}
+    </div>
+    <div class="card">
+      <div class="table-responsive">
+        <table class="yuju-table">
+          <thead>
+            <tr>
+              <th>강사명</th>
+              <th>일자</th>
+              <th>근무 계획</th>
+              <th>실제 출근</th>
+              <th>실제 퇴근</th>
+              <th>휴게</th>
+              <th>실수령 시간</th>
+              <th>결재 상태</th>
+              <th>결재</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHTML || `<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:30px;">제출된 근무 일지가 없습니다.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  if (window.lucide) window.lucide.createIcons();
+}
+window.renderTeacherLogApprovalView = renderTeacherLogApprovalView;
+
+async function approveTeacherLog(logId) {
+  const log = state.teacherWorkLogs.find(l => l.id === logId);
+  if (!log) return;
+  if (!confirm(`${log.date} ${state.teachers.find(t=>t.id===log.teacherId)?.name || ''} 강사의 근무 일지를 최종 결재하시겠습니까?`)) return;
+
+  log.isConfirmed = true;
+  try {
+    if (supabaseClient) {
+      await supabaseClient.from("agy_teacher_worklogs").update({ data: log }).eq("id", logId);
+    }
+    alert("결재가 완료되었습니다.");
+    await loadAllData();
+    renderTeacherLogApprovalView();
+  } catch (err) {
+    console.error(err);
+    alert("결재 처리 중 오류가 발생했습니다.");
+  }
+}
+window.approveTeacherLog = approveTeacherLog;
+
+// 근무 일지 월 변경 시 해당 뷰 다시 렌더링
+const _origChangeOpsMonth = typeof changeOpsMonth !== 'undefined' ? changeOpsMonth : null;
+
+
+
 let enrollSelectedStudentId = ""; // 캘린더 조회 타겟 학생
 let scheduleViewMode = "daily"; // daily: 일별등록표, weekly: 주간등록표
 
@@ -2776,6 +3116,26 @@ function makeTimeOptions(selectedVal, minTime = "00:00", maxTime = "24:00") {
 }
 window.makeTimeOptions = makeTimeOptions;
 
+// 해당 월의 특정 요일에 매칭되는 첫 번째 비휴무 운영 일정의 시간대를 조회하는 헬퍼 함수
+function getOpsHoursForDayOfWeek(dayKey) {
+  const [year, month] = opsYearMonth.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthOps = state.monthlyOperations[opsYearMonth] || {};
+  
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
+    const dayOfWeek = new Date(year, month - 1, d).getDay();
+    if (dayOfWeek === dayKey) {
+      const op = monthOps[dateStr];
+      if (op && !op.isHoliday) {
+        return { start: op.start, end: op.end };
+      }
+    }
+  }
+  return { start: "13:00", end: "22:00" }; // 기본값 반환
+}
+window.getOpsHoursForDayOfWeek = getOpsHoursForDayOfWeek;
+
 // 주간 시간표 직접 작성 모달
 function openWeeklyScheduleModal() {
   const days = ["월", "화", "수", "목", "금", "토", "일"];
@@ -2786,6 +3146,16 @@ function openWeeklyScheduleModal() {
   const rowsHTML = days.map((label, i) => {
     const dayKey = dayKeys[i];
     const color = dayKey === 0 ? "var(--accent-red)" : (dayKey === 6 ? "#3b82f6" : "#222");
+    
+    // 해당 요일의 가동 운영 시간 가져오기
+    const opHours = getOpsHoursForDayOfWeek(dayKey);
+    const minTime = opHours.start;
+    const maxTime = opHours.end;
+
+    // 해당 요일의 운영 시작/종료 시간을 기본 선택값으로 사용 (예: 화/수요일의 경우 14:00 ~ 15:00이 기본 지정됨)
+    const startVal = minTime;
+    const endVal = maxTime;
+
     return `
       <tr style="border-bottom:1px solid var(--border-color);">
         <td style="padding:10px 14px; font-weight:800; font-size:15px; color:${color}; width:36px; text-align:center;">${label}</td>
@@ -2800,12 +3170,12 @@ function openWeeklyScheduleModal() {
           <div style="display:flex; gap:6px; align-items:center; opacity:0.3; pointer-events:none; flex-wrap:wrap;" id="weekday_time_inner_${dayKey}">
             <select id="weekday_start_${dayKey}"
               style="padding:7px 10px; border:2px solid var(--border-color); border-radius:8px; font-size:13px; font-weight:700; background:white; cursor:pointer; min-width:110px;">
-              ${makeTimeOptions(defaultStart)}
+              ${makeTimeOptions(startVal, minTime, maxTime)}
             </select>
             <span style="font-weight:900; font-size:16px; color:var(--text-muted);">~</span>
             <select id="weekday_end_${dayKey}"
               style="padding:7px 10px; border:2px solid var(--border-color); border-radius:8px; font-size:13px; font-weight:700; background:white; cursor:pointer; min-width:110px;">
-              ${makeTimeOptions(defaultEnd)}
+              ${makeTimeOptions(endVal, minTime, maxTime)}
             </select>
           </div>
         </td>
@@ -2860,6 +3230,18 @@ function toggleWeekdayRow(dayKey) {
 
 // 주차별 반복 적용 실행
 async function applyWeeklyScheduleToMonth() {
+  const isStudent = state.currentUser.role === 'student';
+  if (isStudent) {
+    const studentInfo = state.students.find(s => s.id === state.currentUser.ref_id);
+    const monthOps = state.monthlyOperations[opsYearMonth] || {};
+    const isMonthEnrollmentAllowed = !!monthOps.allowEnrollment;
+    const isLocked = !isMonthEnrollmentAllowed && (studentInfo && !studentInfo.isEditAllowed);
+    if (isLocked) {
+      alert("원장님이 이번 달 수강 일정을 확정하였습니다. 수정이 필요하면 원장실에 문의해 주세요.");
+      return;
+    }
+  }
+
   const dayKeys = [0, 1, 2, 3, 4, 5, 6];
   const selected = [];
 
@@ -2894,12 +3276,18 @@ async function applyWeeklyScheduleToMonth() {
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
     const dayOfWeek = new Date(year, month - 1, d).getDay();
-    const op = monthOps[dateStr] || { isHoliday: false };
+    const op = monthOps[dateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
 
     if (op.isHoliday) continue;
 
     const match = selected.find(s => s.dayKey === dayOfWeek);
     if (!match) continue;
+
+    // 개별 날짜 가동 운영시간 유효성 한 번 더 교차 검증
+    if ((op.start && match.start < op.start) || (op.end && match.end > op.end)) {
+      alert(`${dateStr} (${dayNames[dayOfWeek]})의 운영 가능 시간(${op.start || "13:00"} ~ ${op.end || "22:00"}) 범위를 벗어나 수강 신청할 수 없습니다.`);
+      return;
+    }
 
     // 기존 일정 제거 (덮어쓰기 정책)
     const existings = state.enrollments.filter(e => e.studentId === enrollSelectedStudentId && e.date === dateStr);
@@ -2995,7 +3383,9 @@ function handleCalendarDateClick(dateStr, isHoliday) {
   // 학생 전용: 수강 등록 / 삭제 통합 모달
   if (isStudent) {
     const studentInfo = state.students.find(s => s.id === state.currentUser.ref_id);
-    const isLocked = studentInfo && !studentInfo.isEditAllowed; // 원장 확정 후 잠금
+    const monthOps = state.monthlyOperations[opsYearMonth] || {};
+    const isMonthEnrollmentAllowed = !!monthOps.allowEnrollment;
+    const isLocked = !isMonthEnrollmentAllowed && (studentInfo && !studentInfo.isEditAllowed); // 원장 확정 후 잠금 (월별 허용 또는 학생별 허용 시 해제)
     const [y, m, d] = dateStr.split("-");
     const dayNames = ["일","월","화","수","목","금","토"];
     const dayName = dayNames[new Date(dateStr).getDay()];
@@ -3333,8 +3723,8 @@ function renderProgress() {
     container.innerHTML = `
       <div style="padding:60px; text-align:center; margin-top:20px; color:var(--text-muted);">
         <i data-lucide="alert-circle" style="width:64px; height:64px; color:var(--accent-red); margin-bottom:16px;"></i>
-        <h2 style="color:var(--text-dark); margin-bottom:12px;">출석 확인 필요</h2>
-        <p>오늘(${state.selectedDate}) 출결 관리에 등록(출석 확정)되지 않았습니다.<br>출결 관리에 먼저 등록 후 이용해 주세요.</p>
+        <h2 style="color:var(--text-dark); margin-bottom:12px;">수강신청 확인 필요</h2>
+        <p>오늘은(${state.selectedDate})  수강신청한 날이 아닙니다<br>수강 신청 부터 먼저 해주세요. 수강신청후에 확정이 되면 진도관리를 작성해 주세요</p>
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
@@ -3471,8 +3861,8 @@ function renderProgressTabContent(studentId) {
     target.innerHTML = `
       <div class="card" style="text-align:center; padding:40px; margin-top:20px; color:var(--text-muted);">
         <i data-lucide="alert-circle" style="width:48px; height:48px; margin:0 auto 12px; color:var(--accent-red)"></i>
-        <h2 style="font-size:18px; font-weight:700; color:var(--text-dark); margin-bottom:12px;">출석 확인 필요</h2>
-        <p>오늘(${state.selectedDate}) 출결 관리에 등록(출석 확정)되지 않았습니다.<br>출결 관리에 먼저 등록 후 이용해 주세요.</p>
+        <h2 style="font-size:18px; font-weight:700; color:var(--text-dark); margin-bottom:12px;">수강신청 확인 필요</h2>
+        <p>오늘은(${state.selectedDate})  수강신청한 날이 아닙니다<br>수강 신청 부터 먼저 해주세요. 수강신청후에 확정이 되면 진도관리를 작성해 주세요</p>
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
@@ -3535,7 +3925,7 @@ function renderProgressTabContent(studentId) {
                     <span class="badge badge-emerald">계획확정</span>
                     <button class="btn btn-secondary" style="padding:6px 10px; font-size:11px; color:var(--accent-red); border:1px solid var(--accent-red);" onclick="cancelApprovePlan('${p.id}')">승인취소</button>
                   ` 
-                  : `<button class="btn btn-emerald" style="padding:6px 10px; font-size:11px; background:var(--accent-gold); color:#3d1a00; border:none;" onclick="approvePlan('${p.id}')">승인대기</button>`
+                  : `<button class="btn btn-emerald" style="padding:6px 10px; font-size:11px; background:var(--accent-gold); color:#3d1a00; border:none;" onclick="approvePlan('${p.id}')">승인</button>`
                 }
               </div>
             </div>
@@ -3543,9 +3933,9 @@ function renderProgressTabContent(studentId) {
         }
       }).join("");
     } else {
-      // 신규 입력 폼: 기본 10개 입력 줄 보이기 + 미완료 항목 prefill
+      // 신규 입력 폼: 최근 계획하였으나 완료하지 못한(미완료) 항목 prefill
       const lastUncompleted = findLastUncompletedPlans(studentId);
-      const initialCount = Math.max(10, lastUncompleted.length);
+      const initialCount = lastUncompleted.length || 1;
       state.currentPlanRowsCount = initialCount;
       
       planInputs = Array.from({ length: initialCount }).map((_, idx) => {
@@ -3589,7 +3979,7 @@ function renderProgressTabContent(studentId) {
                 <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
                   <i data-lucide="plus-circle"></i> [+ 계획 추가]
                 </button>
-                <button class="btn btn-emerald" style="flex:2; justify-content:center; background:var(--accent-gold); color:#3d1a00; font-weight:bold;" onclick="confirmProgressPlans('${studentId}')">계획 확정</button>
+                <button class="btn btn-emerald" style="flex:2; justify-content:center; background:var(--accent-gold); color:#3d1a00; font-weight:bold;" onclick="confirmProgressPlans('${studentId}')">전체 계획 확정</button>
               </div>
             `}
           ` : ''}
@@ -3600,57 +3990,174 @@ function renderProgressTabContent(studentId) {
     
   } else {
     // --- 2. 당일 실적 등록 탭 ---
-    let resultRows = plansToday.map((p, idx) => {
-      const showConfirmed = p.isConfirmed;
-      const actualIn = p.actualStartTime || p.plannedStartTime;
-      const actualOut = p.actualEndTime || p.plannedEndTime;
-      const calcDuration = calculateMinutes(actualIn, actualOut);
-      
-      return `
-        <div class="plan-card ${p.isConfirmed ? 'confirmed' : ''}" style="margin-bottom:16px; padding:16px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <span style="font-weight:800; font-size:15px;">#${idx + 1} - ${escapeHTML(p.activityName)}</span>
-            <span style="font-size:12px; color:var(--text-muted);">계획: ${p.plannedStartTime}~${p.plannedEndTime} (${p.plannedDuration}분)</span>
-          </div>
-          
-          <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
-            <div class="form-group" style="margin-bottom:0; width:140px;">
-              <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 시작시간</label>
-              ${makeTimeSelectHTML('realStart_' + p.id, actualIn, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;' + (p.isConfirmed ? ' pointer-events:none; opacity:0.6;' : ''))}
-            </div>
-            <div class="form-group" style="margin-bottom:0; width:140px;">
-              <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 완료시간</label>
-              ${makeTimeSelectHTML('realEnd_' + p.id, actualOut, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;' + (p.isConfirmed ? ' pointer-events:none; opacity:0.6;' : ''))}
-            </div>
-            
-            <div style="margin-left:12px; display:flex; align-items:center; gap:6px;">
-              <input type="checkbox" id="realComp_${p.id}" ${p.isCompleted ? 'checked' : ''} ${p.isConfirmed ? 'disabled' : ''} style="width:18px; height:18px; cursor:pointer;">
-              <label for="realComp_${p.id}" style="font-weight:700; font-size:12px; cursor:pointer;">활동 완료 여부</label>
-            </div>
-            
-            <div style="margin-left:auto; display:flex; gap:6px;">
-              ${!p.isConfirmed ? `
-                <input type="checkbox" class="result-bulk-chk" value="${p.id}" style="width:18px; height:18px; align-self:center; margin-right:8px; cursor:pointer;" title="일괄 반영 대상" checked>
-                ${isStudent ? `<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', false)">일시 저장</button>` : ''}
-                ${state.currentUser.role !== 'student' ? `<button class="btn btn-emerald" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', true)">진도 확정</button>` : ''}
-              ` : `<span class="badge badge-emerald">원장/조교 검재 확정 완료</span>`}
-            </div>
-          </div>
-        </div>
-      `;
-    }).join("");
+    const isStudent = state.currentUser.role === 'student';
+    let resultRows = "";
+    let plansForResults = [];
+    let savedPlans = [];
+    let uncompletedPlans = [];
     
-    if (resultRows === "") {
-      resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">계획 탭에서 오늘의 계획을 먼저 등록해야 실적 작성이 가능합니다.</p>`;
+    if (isStudent) {
+      plansForResults = plansToday.filter(p => p.isPlanConfirmed);
+      resultRows = plansForResults.map((p, idx) => {
+        const actualIn = p.actualStartTime || p.plannedStartTime;
+        const actualOut = p.actualEndTime || p.plannedEndTime;
+        
+        return `
+          <div class="plan-card ${p.isConfirmed ? 'confirmed' : ''}" style="margin-bottom:16px; padding:16px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <span style="font-weight:800; font-size:15px;">#${idx + 1} - ${escapeHTML(p.activityName)}</span>
+              <span style="font-size:12px; color:var(--text-muted);">계획: ${p.plannedStartTime}~${p.plannedEndTime} (${p.plannedDuration}분)</span>
+            </div>
+            
+            <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+              <div class="form-group" style="margin-bottom:0; width:140px;">
+                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 시작시간</label>
+                ${makeTimeSelectHTML('realStart_' + p.id, actualIn, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;' + (p.isConfirmed ? ' pointer-events:none; opacity:0.6;' : ''))}
+              </div>
+              <div class="form-group" style="margin-bottom:0; width:140px;">
+                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 완료시간</label>
+                ${makeTimeSelectHTML('realEnd_' + p.id, actualOut, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;' + (p.isConfirmed ? ' pointer-events:none; opacity:0.6;' : ''))}
+              </div>
+              
+              <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
+                ${p.isConfirmed ? `
+                  <div style="display:flex; align-items:center; gap:6px; opacity:0.8;">
+                    <input type="checkbox" checked disabled style="width:18px; height:18px;">
+                    <span style="font-weight:700; font-size:12px; color:#059669;">활동완료 여부</span>
+                  </div>
+                  <span class="badge badge-emerald" style="background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; font-weight:800;">✅ 원장/조교 확정 완료</span>
+                ` : `
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" id="realComp_${p.id}" class="result-bulk-chk" value="${p.id}" style="width:18px; height:18px; cursor:pointer;" ${p.isApprovalRequested ? 'checked' : ''}>
+                    <label for="realComp_${p.id}" style="font-weight:700; font-size:12px; cursor:pointer;">활동완료 여부</label>
+                  </div>
+                  ${p.isApprovalRequested 
+                    ? `<span class="badge badge-primary" style="background:#dbeafe; color:#1e40af; border:1px solid #bfdbfe; font-weight:800;">승인요청</span>` 
+                    : `<span class="badge badge-gray" style="color:#b91c1c; background:#fee2e2; border:1px solid #fecaca; font-weight:800;">미완료</span>`
+                  }
+                `}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+      
+      if (resultRows === "") {
+        resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">원장님의 계획 승인이 완료된 항목이 없습니다.<br>계획 승인 완료 후 실적 작성이 가능합니다.</p>`;
+      }
+      
+    } else {
+      // 원장/강사 뷰: 학생이 승인요청한 항목(savedPlans) + 오늘 계획하였으나 못한 실적(uncompletedPlans) 분리 표시
+      const activePlans = plansToday.filter(p => p.isPlanConfirmed);
+      savedPlans = activePlans.filter(p => p.isApprovalRequested || p.isConfirmed);
+      uncompletedPlans = activePlans.filter(p => !p.isApprovalRequested && !p.isConfirmed);
+      plansForResults = activePlans;
+      
+      let savedRows = savedPlans.map((p, idx) => {
+        const actualIn = p.actualStartTime || p.plannedStartTime;
+        const actualOut = p.actualEndTime || p.plannedEndTime;
+        
+        return `
+          <div class="plan-card ${p.isConfirmed ? 'confirmed' : ''}" style="margin-bottom:16px; padding:16px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <span style="font-weight:800; font-size:15px;">#${idx + 1} - ${escapeHTML(p.activityName)} <span style="font-size:11px; color:var(--primary-color); background:#eff6ff; padding:2px 6px; border-radius:4px; margin-left:6px;">승인요청</span></span>
+              <span style="font-size:12px; color:var(--text-muted);">계획: ${p.plannedStartTime}~${p.plannedEndTime} (${p.plannedDuration}분)</span>
+            </div>
+            
+            <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+              <div class="form-group" style="margin-bottom:0; width:140px;">
+                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 시작시간</label>
+                ${makeTimeSelectHTML('realStart_' + p.id, actualIn, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;' + (p.isConfirmed ? ' pointer-events:none; opacity:0.6;' : ''))}
+              </div>
+              <div class="form-group" style="margin-bottom:0; width:140px;">
+                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 완료시간</label>
+                ${makeTimeSelectHTML('realEnd_' + p.id, actualOut, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;' + (p.isConfirmed ? ' pointer-events:none; opacity:0.6;' : ''))}
+              </div>
+              
+              <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
+                ${!p.isConfirmed ? `
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <input type="checkbox" id="realComp_${p.id}" class="result-bulk-chk" value="${p.id}" style="width:18px; height:18px; cursor:pointer;" checked>
+                    <label for="realComp_${p.id}" style="font-weight:700; font-size:12px; cursor:pointer;">활동완료 여부</label>
+                  </div>
+                  <button class="btn btn-emerald" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', true)">진도 확정</button>
+                ` : `
+                  <div style="display:flex; align-items:center; gap:6px; opacity:0.6;">
+                    <input type="checkbox" checked disabled style="width:18px; height:18px;">
+                    <span style="font-weight:700; font-size:12px;">활동완료 여부</span>
+                  </div>
+                  <span class="badge badge-emerald">원장/조교 검재 확정 완료</span>
+                `}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      let uncompletedRows = uncompletedPlans.map((p, idx) => {
+        const actualIn = p.actualStartTime || p.plannedStartTime;
+        const actualOut = p.actualEndTime || p.plannedEndTime;
+        
+        return `
+          <div class="plan-card" style="margin-bottom:16px; padding:16px; border:1px dashed #fda4af; border-radius:var(--radius-md); background:#fafafa; opacity:0.8;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <span style="font-weight:800; font-size:15px; color:#b91c1c;">#${savedPlans.length + idx + 1} - ${escapeHTML(p.activityName)}</span>
+              <span style="font-size:12px; color:var(--text-muted);">계획: ${p.plannedStartTime}~${p.plannedEndTime} (${p.plannedDuration}분)</span>
+            </div>
+            
+            <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+              <div class="form-group" style="margin-bottom:0; width:140px;">
+                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 시작시간</label>
+                ${makeTimeSelectHTML('realStart_' + p.id, actualIn, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc; pointer-events:none; opacity:0.6;')}
+              </div>
+              <div class="form-group" style="margin-bottom:0; width:140px;">
+                <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 완료시간</label>
+                ${makeTimeSelectHTML('realEnd_' + p.id, actualOut, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc; pointer-events:none; opacity:0.6;')}
+              </div>
+              
+              <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
+                <div style="display:flex; align-items:center; gap:6px; opacity:0.6;">
+                  <input type="checkbox" disabled style="width:18px; height:18px;">
+                  <span style="font-weight:700; font-size:12px;">활동완료 여부</span>
+                </div>
+                <span class="badge badge-gray" style="color:#b91c1c; background:#fee2e2; border:1px solid #fecaca; font-weight:800;">미완료</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      resultRows = `
+        ${savedRows ? `
+          <div style="margin-bottom: 24px;">
+            <div style="font-weight:800; font-size:14px; color:var(--primary-color); margin-bottom:12px; display:flex; align-items:center; gap:6px;">📝 학생이 제출 및 승인 요청한 실적 목록 (${savedPlans.length}건)</div>
+            ${savedRows}
+          </div>
+        ` : ''}
+        ${uncompletedRows ? `
+          <div>
+            <div style="font-weight:800; font-size:14px; color:#e11d48; margin-bottom:12px; display:flex; align-items:center; gap:6px;">⚠️ 계획하였으나 이행하지 못한 실적 목록 (${uncompletedPlans.length}건)</div>
+            ${uncompletedRows}
+          </div>
+        ` : ''}
+      `;
+
+      if (savedPlans.length === 0 && uncompletedPlans.length === 0) {
+        resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">계획 탭에서 오늘의 계획을 먼저 등록해야 실적 작성이 가능합니다.</p>`;
+      }
     }
+
+    const showBulkButton = isStudent 
+      ? (plansForResults.length > 0 && plansForResults.some(p => !p.isConfirmed))
+      : (savedPlans.length > 0 && savedPlans.some(p => !p.isConfirmed));
 
     target.innerHTML = `
       <div class="card">
         <div class="card-title">🏆 ${escapeHTML(st.name)} 학생 당일 진도 및 완료 실적 기입 대장</div>
         ${resultRows}
-        ${plansToday.length > 0 && plansToday.some(p => !p.isConfirmed) ? `
+        ${showBulkButton ? `
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
-             ${isStudent ? `<button class="btn btn-secondary" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(false)">💾 선택 항목 일괄 임시저장</button>` : ''}
+             ${isStudent ? `<button class="btn btn-secondary" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(false)">💾 선택 항목 일괄 저장</button>` : ''}
              ${state.currentUser.role !== 'student' ? `<button class="btn btn-emerald" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(true)">✅ 선택 항목 일괄 확정</button>` : ''}
           </div>
         ` : ''}
@@ -3825,27 +4332,27 @@ function addPlanRow(studentId) {
 }
 
 // 이전 등원 일자 중 '미완료' 상태로 남겨진 진도 계획 선별 기능
+// 단, '가장 마지막으로 계획이 있었던 날짜'에서만 미완료를 추려서 이월함
 function findLastUncompletedPlans(studentId) {
-  const sortedPlans = [...state.dailyPlans]
-    .filter(p => p.studentId === studentId && !p.isCompleted && p.date < state.selectedDate)
+  // 1. 선택 날짜보다 이전인 계획 중 계획확정(isPlanConfirmed)된 것들만 대상
+  const prevPlans = [...state.dailyPlans]
+    .filter(p => p.studentId === studentId && p.isPlanConfirmed && p.date < state.selectedDate)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
-    
-  // 고유 활동명 기준 중복 제거하여 미완료 리스트 반환
-  const uniqueNames = new Set();
-  const result = [];
-  
-  sortedPlans.forEach(p => {
-    if (!uniqueNames.has(p.activityName)) {
-      uniqueNames.add(p.activityName);
-      result.push({
-        activityName: p.activityName,
-        start: p.plannedStartTime,
-        end: p.plannedEndTime
-      });
-    }
-  });
-  
-  return result;
+
+  if (prevPlans.length === 0) return [];
+
+  // 2. 가장 최근 날짜를 찾아 그 날짜의 계획만 추림
+  const lastDate = prevPlans[0].date;
+  const plansOnLastDate = prevPlans.filter(p => p.date === lastDate);
+
+  // 3. 그 날짜 중 원장/강사가 확정하지 않은(미완료) 것만 반환
+  return plansOnLastDate
+    .filter(p => !p.isCompleted && !p.isConfirmed)
+    .map(p => ({
+      activityName: p.activityName,
+      start: p.plannedStartTime,
+      end: p.plannedEndTime
+    }));
 }
 
 // 계획 수립 시간 중첩(오버랩) 검증 헬퍼
@@ -4300,9 +4807,12 @@ async function saveStudentResult(planId, makeConfirmed) {
   plan.actualEndTime = end;
   plan.isCompleted = isCompleted;
   plan.isConfirmed = makeConfirmed;
+  if (state.currentUser.role === 'student') {
+    plan.isStudentSaved = true;
+  }
   
   if (!supabaseClient) {
-    alert(makeConfirmed ? "진도가 완료 확정되었습니다. (오프라인 모드)" : "실적이 임시 저장되었습니다. (오프라인 모드)");
+    alert(makeConfirmed ? "진도가 완료 확정되었습니다. (오프라인 모드)" : "실적이 저장되었습니다. (오프라인 모드)");
     renderProgress();
     return;
   }
@@ -4314,7 +4824,7 @@ async function saveStudentResult(planId, makeConfirmed) {
       .eq("id", planId);
       
     if (!error) {
-      alert(makeConfirmed ? "진도가 완료 확정되었습니다." : "실적이 임시 저장되었습니다.");
+      alert(makeConfirmed ? "진도가 완료 확정되었습니다." : "실적이 저장되었습니다.");
       await loadAllData();
       renderProgress();
     }
@@ -4365,49 +4875,124 @@ async function bulkApprovePlans() {
 window.bulkApprovePlans = bulkApprovePlans;
 
 async function bulkSaveStudentResults(makeConfirmed) {
-  const checkboxes = document.querySelectorAll('.result-bulk-chk:checked');
-  if (checkboxes.length === 0) {
-    alert("일괄 반영할 실적을 먼저 선택해 주세요.");
-    return;
-  }
+  const isStudent = state.currentUser.role === 'student';
   
-  const actionText = makeConfirmed ? "확정" : "임시저장";
-  if (!confirm(`선택한 ${checkboxes.length}개의 실적을 일괄 ${actionText} 하시겠습니까?`)) return;
-  
-  const updates = [];
-  checkboxes.forEach(chk => {
-    const planId = chk.value;
-    const plan = state.dailyPlans.find(p => p.id === planId);
-    if (plan) {
-      const start = document.getElementById(`realStart_${planId}`).value;
-      const end = document.getElementById(`realEnd_${planId}`).value;
-      const isCompleted = document.getElementById(`realComp_${planId}`).checked;
-      
-      plan.actualStartTime = start;
-      plan.actualEndTime = end;
-      plan.isCompleted = isCompleted;
-      plan.isConfirmed = makeConfirmed;
-      updates.push({ id: plan.id, data: plan });
+  if (isStudent) {
+    const studentId = progressSelectedStudentId || state.currentUser.ref_id;
+    const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate && p.isPlanConfirmed);
+    if (plansToday.length === 0) {
+      alert("일괄 저장할 계획이 없습니다.");
+      return;
     }
-  });
-  
-  if (!supabaseClient) {
-    alert(`실적이 일괄 ${actionText} 되었습니다. (오프라인 모드)`);
-    renderProgress();
-    return;
-  }
-  
-  try {
-    const { error } = await supabaseClient.from("agy_daily_plans").upsert(updates);
-    if (!error) {
-      alert(`선택 항목이 성공적으로 일괄 ${actionText} 되었습니다.`);
-      await loadAllData();
-      renderProgress();
+    
+    const selectedPlans = [];
+    plansToday.forEach(plan => {
+      const chk = document.querySelector(`.result-bulk-chk[value="${plan.id}"]`);
+      if (chk && chk.checked) {
+        selectedPlans.push(plan.activityName);
+      }
+    });
+
+    let confirmMsg = "";
+    if (selectedPlans.length > 0) {
+      confirmMsg = `작성한 실적을 저장(승인요청) 하시겠습니까?\n\n[선택된 항목]:\n${selectedPlans.map(name => `- ${name}`).join('\n')}`;
     } else {
-      alert("일괄 반영 중 오류가 발생했습니다.");
+      confirmMsg = "선택한 항목이 없습니다. 모든 실적을 미완료 상태로 저장하시겠습니까?";
     }
-  } catch (err) {
-    console.error(err);
+    
+    if (!confirm(confirmMsg)) return;
+    
+    const updates = [];
+    plansToday.forEach(plan => {
+      const chk = document.querySelector(`.result-bulk-chk[value="${plan.id}"]`);
+      if (chk && chk.checked) {
+        const start = document.getElementById(`realStart_${plan.id}`).value;
+        const end = document.getElementById(`realEnd_${plan.id}`).value;
+        const isCompleted = document.getElementById(`realComp_${plan.id}`).checked;
+        
+        plan.actualStartTime = start;
+        plan.actualEndTime = end;
+        plan.isCompleted = isCompleted;
+        plan.isConfirmed = false;
+        plan.isStudentSaved = true;
+        plan.isApprovalRequested = true;
+      } else {
+        // 선택 해제된 것은 미완료 처리
+        plan.actualStartTime = "";
+        plan.actualEndTime = "";
+        plan.isCompleted = false;
+        plan.isConfirmed = false;
+        plan.isStudentSaved = false;
+        plan.isApprovalRequested = false;
+      }
+      updates.push({ id: plan.id, data: plan });
+    });
+    
+    if (!supabaseClient) {
+      alert("실적이 저장되었습니다. (오프라인 모드)");
+      renderProgress();
+      return;
+    }
+    
+    try {
+      const { error } = await supabaseClient.from("agy_daily_plans").upsert(updates);
+      if (!error) {
+        alert("실적이 성공적으로 저장되었습니다.");
+        await loadAllData();
+        renderProgress();
+      } else {
+        alert("저장 중 오류가 발생했습니다.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    
+  } else {
+    // 원장/강사: 선택한 실적들만 일괄 진도 확정
+    const checkboxes = document.querySelectorAll('.result-bulk-chk:checked');
+    if (checkboxes.length === 0) {
+      alert("일괄 반영할 실적을 먼저 선택해 주세요.");
+      return;
+    }
+    
+    const actionText = makeConfirmed ? "확정" : "저장";
+    if (!confirm(`선택한 ${checkboxes.length}개의 실적을 일괄 ${actionText} 하시겠습니까?`)) return;
+    
+    const updates = [];
+    checkboxes.forEach(chk => {
+      const planId = chk.value;
+      const plan = state.dailyPlans.find(p => p.id === planId);
+      if (plan) {
+        const start = document.getElementById(`realStart_${planId}`).value;
+        const end = document.getElementById(`realEnd_${planId}`).value;
+        const isCompleted = document.getElementById(`realComp_${planId}`).checked;
+        
+        plan.actualStartTime = start;
+        plan.actualEndTime = end;
+        plan.isCompleted = isCompleted;
+        plan.isConfirmed = makeConfirmed;
+        updates.push({ id: plan.id, data: plan });
+      }
+    });
+    
+    if (!supabaseClient) {
+      alert(`실적이 일괄 ${actionText} 되었습니다. (오프라인 모드)`);
+      renderProgress();
+      return;
+    }
+    
+    try {
+      const { error } = await supabaseClient.from("agy_daily_plans").upsert(updates);
+      if (!error) {
+        alert(`선택 항목이 성공적으로 일괄 ${actionText} 되었습니다.`);
+        await loadAllData();
+        renderProgress();
+      } else {
+        alert("일괄 반영 중 오류가 발생했습니다.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
   }
 }
 window.bulkSaveStudentResults = bulkSaveStudentResults;
