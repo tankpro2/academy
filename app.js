@@ -235,7 +235,20 @@ async function loadAllData() {
     state.attendance = (resAttendance.data || []).map(r => r.data);
     state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
     state.notices = (resNotices.data || []).map(r => r.data || r).filter(Boolean);
-    state.consultations = (resConsultations.data || []).map(r => r.data || r).filter(Boolean);
+    
+    // Supabase 데이터 + 로컬스토리지 보관 데이터 병합 (중복 제거)
+    const remoteConsultations = (resConsultations.data || []).map(r => r.data || r).filter(Boolean);
+    let localConsultations = [];
+    try {
+      localConsultations = JSON.parse(localStorage.getItem("yuju_local_consultations") || "[]");
+    } catch (e) {}
+
+    const consultMap = new Map();
+    [...localConsultations, ...remoteConsultations].forEach(c => {
+      if (c && c.id) consultMap.set(c.id, c);
+    });
+    
+    state.consultations = Array.from(consultMap.values());
     if ((!state.consultations || state.consultations.length === 0) && window.mockData && window.mockData.consultations) {
       state.consultations = window.mockData.consultations;
     }
@@ -4276,11 +4289,57 @@ function renderConsultations() {
   if (window.lucide) window.lucide.createIcons();
 }
 
+async function saveConsultationRecord(consultationData) {
+  if (!state.consultations) state.consultations = [];
+  
+  // 1. 메모리 state 최상단 추가
+  const exists = state.consultations.find(c => c.id === consultationData.id);
+  if (!exists) {
+    state.consultations.unshift(consultationData);
+  }
+
+  // 2. 브라우저 localStorage에 영구 보관 (페이지 새로고침/네트워크 지연 대비)
+  try {
+    let localList = JSON.parse(localStorage.getItem("yuju_local_consultations") || "[]");
+    if (!localList.find(c => c.id === consultationData.id)) {
+      localList.unshift(consultationData);
+      localStorage.setItem("yuju_local_consultations", JSON.stringify(localList));
+    }
+  } catch (e) {
+    console.warn("localStorage consultation save failed:", e);
+  }
+
+  // 3. Supabase DB 비동기 저장
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from("agy_consultations").upsert([
+        {
+          id: consultationData.id,
+          data: consultationData,
+          name: consultationData.name || consultationData.studentName,
+          phone: consultationData.phone,
+          field: consultationData.field,
+          grade: consultationData.grade,
+          memo: consultationData.memo,
+          status: consultationData.status,
+          created_at: consultationData.createdAt
+        }
+      ]);
+    } catch (e) {
+      console.error("상담 신청 DB 저장 실패:", e);
+    }
+  }
+}
+
 async function handleHomepageContactModal(field) {
-  const name = document.getElementById('modalContactName').value.trim();
-  const phone = document.getElementById('modalContactPhone').value.trim();
-  const grade = document.getElementById('modalContactGrade').value.trim();
+  const nameInput = document.getElementById('modalContactName');
+  const phoneInput = document.getElementById('modalContactPhone');
+  const gradeInput = document.getElementById('modalContactGrade');
   const memoEl = document.getElementById('modalContactMemo');
+
+  const name = nameInput ? nameInput.value.trim() : '';
+  const phone = phoneInput ? phoneInput.value.trim() : '';
+  const grade = gradeInput ? gradeInput.value.trim() : '';
   const memo = memoEl ? memoEl.value.trim() : '';
 
   if (!name || !phone || !grade) {
@@ -4305,18 +4364,7 @@ async function handleHomepageContactModal(field) {
     status: '대기중'
   };
 
-  // 상태 업데이트
-  if (!state.consultations) state.consultations = [];
-  state.consultations.unshift(consultationData);
-
-  // DB 저장 (비동기)
-  if (supabaseClient) {
-    try {
-      await supabaseClient.from("agy_consultations").upsert([{ id: consultationData.id, data: consultationData }]);
-    } catch (e) {
-      console.error("상담 신청 DB 저장 실패:", e);
-    }
-  }
+  await saveConsultationRecord(consultationData);
 
   alert(name + ' 학생(' + grade + ')의 [' + field + '] 상담 신청이 성공적으로 접수되었습니다!\n원장님이 확인 후 기재해주신 연락처(' + phone + ')로 직접 전화 드리겠습니다. 감사합니다.');
   closeModal();
@@ -5138,16 +5186,7 @@ async function handleHomepageContact(event) {
     status: '대기중'
   };
 
-  if (!state.consultations) state.consultations = [];
-  state.consultations.unshift(consultationData);
-
-  if (supabaseClient) {
-    try {
-      await supabaseClient.from("agy_consultations").upsert([{ id: consultationData.id, data: consultationData }]);
-    } catch (e) {
-      console.error("간편 상담 신청 DB 저장 실패:", e);
-    }
-  }
+  await saveConsultationRecord(consultationData);
 
   alert(`${name} 학생의 [${field}] 간편 상담 신청이 성공적으로 접수되었습니다.\n학원에서 내용을 검토한 후 입력하신 연락처(${phone})로 신속하게 안내해 드리겠습니다. 감사합니다!`);
   if (event && event.target && event.target.reset) event.target.reset();
@@ -5158,7 +5197,7 @@ async function handleHomepageContact(event) {
 }
 
 function openConsultationModal(field) {
-  const title = (field === '국어/독서코칭') ? '대치리드인 국어 독서코칭' : '유주코칭 진로진학컨설팅';
+  const title = (field === '국어/독서코칭') ? '대치리드인 국어 독서코칭' : '유주코칭 진로진학 학습법연구소';
   const content = document.createElement('div');
   content.innerHTML = `
     <div class="modal-header">
@@ -5166,7 +5205,7 @@ function openConsultationModal(field) {
       <button class="modal-close" onclick="closeModal()">&times;</button>
     </div>
     <div class="modal-body">
-      <form id="consultationForm" style="display: flex; flex-direction: column; gap: 14px;">
+      <form id="consultationForm" onsubmit="event.preventDefault(); handleHomepageContactModal('${field}');" style="display: flex; flex-direction: column; gap: 14px;">
         <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
           <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학생 이름</label>
           <input type="text" id="modalContactName" placeholder="학생 이름을 입력하세요" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
@@ -5183,7 +5222,7 @@ function openConsultationModal(field) {
           <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">문의 및 참고사항</label>
           <textarea id="modalContactMemo" placeholder="원장님께 전달할 특별한 내용(예: 독서 수준, 학습 성향 등)을 적어주세요." style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 80px; resize: none;"></textarea>
         </div>
-        <button type="button" id="consultSubmitBtn" class="btn btn-emerald" style="width: 100%; padding: 12px; font-weight: 600; border:none; border-radius:var(--radius-sm); cursor:pointer; background-color: var(--primary-color); color:white; margin-top:10px;">상담 신청 완료하기</button>
+        <button type="submit" id="consultSubmitBtn" class="btn btn-emerald" style="width: 100%; padding: 12px; font-weight: 600; border:none; border-radius:var(--radius-sm); cursor:pointer; background-color: var(--primary-color); color:white; margin-top:10px;">상담 신청 완료하기</button>
       </form>
     </div>
   `;
@@ -5193,10 +5232,6 @@ function openConsultationModal(field) {
   modalContent.appendChild(content);
   overlay.style.display = 'flex';
   if (window.lucide) window.lucide.createIcons();
-
-  document.getElementById('consultSubmitBtn').addEventListener('click', function() {
-    handleHomepageContactModal(field);
-  });
 }
 
 
