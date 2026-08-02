@@ -5830,7 +5830,7 @@ function updateConsultMemoPlaceholder() {
   if (val.includes("유주코칭국어학원") || val.includes("대치리드인") || val.includes("국어")) {
     memoEl.placeholder = "레벨테스트 가능한 시간, 요일 서너개 남겨주세요. 레벨테스트방법은 블로그바로가기 클릭해서 공지사항 읽어주세요.(현재 초4이상만 가능)";
   } else {
-    memoEl.placeholder = "진로/진학/ 학습유형검사중 선택해서 기재하시고 세부내용 적어주세요.부모동반 컨설팅이 원칙이며 예비중1이상 가능합니다. 원하시는 날짜, 시간도 적어주세요.";
+    memoEl.placeholder = "진로 / 진학 / 학습유형검사 중 선택해서 기재하시고 세부내용 적어주세요. 부모동반 컨설팅이 원칙이며 예비 중1 이상 가능합니다. 원하시는 날짜, 시간도 적어주세요.";
   }
 }
 window.updateConsultMemoPlaceholder = updateConsultMemoPlaceholder;
@@ -5931,7 +5931,7 @@ function openConsultationModal(field) {
   const title = isKoreanReading ? '유주코칭국어학원(대치리드인)' : '유주코칭 진로진학 학습법 컨설팅';
   const placeholderText = isKoreanReading
     ? "레벨테스트 가능한 시간, 요일 서너개 남겨주세요. 레벨테스트방법은 블로그바로가기 클릭해서 공지사항 읽어주세요.(현재 초4이상만 가능)"
-    : "진로/진학/ 학습유형검사중 선택해서 기재하시고 세부내용 적어주세요.부모동반 컨설팅이 원칙이며 예비중1이상 가능합니다. 원하시는 날짜, 시간도 적어주세요.";
+    : "진로 / 진학 / 학습유형검사 중 선택해서 기재하시고 세부내용 적어주세요. 부모동반 컨설팅이 원칙이며 예비 중1 이상 가능합니다. 원하시는 날짜, 시간도 적어주세요.";
 
   const content = document.createElement('div');
   content.innerHTML = `
@@ -6011,7 +6011,7 @@ function getHomepageHTML(isPublic) {
             📞 <strong>상담 대표 번호:</strong> <a href="tel:010-4055-0756" style="color:#fcd34d; font-size:16px; font-weight:900; text-decoration:underline;">010-4055-0756(문자만 가능)</a>
           </div>
           📍 <strong>1관 코칭국어학원:</strong> 도곡로93길 9, 3층 (피아이 어학원 앞, Seven11 건물)<br>
-          📍 <strong>2관 컨설팅:</strong> 대치동 938-8번지 1층(롯데문화센터옆, 설빙 맞은편 골목)<br>
+          📍 <strong>2관 컨설팅:</strong> 대치동 938-8번지 1층 (롯데문화센터 옆, 설빙 맞은편 골목)<br>
           <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.15); font-style:italic; font-size:12.5px; color:#e2e8f0; word-break:keep-all; line-height:1.6;">
             "AI시대는 제대로 읽는 학생이 성공합니다.<br>유주코칭국어학원에서 문해력을 성장시키고 맞춤 컨설팅으로 꿈을 이루세요."
           </div>
@@ -6031,7 +6031,7 @@ function getHomepageHTML(isPublic) {
               <span class="badge badge-emerald">독해 및 국어 전문</span>
             </div>
             <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
-              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 숙제 없이 모든 과정 진행 합니다</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 숙제 없이 모든 과정 진행합니다</li>
               <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 특허받은 수준별 맞춤 독서 코칭</li>
               <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 초등 / 중등 독서독해 수준별 개인별 맞춤코칭</li>
               <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 중고등 국어 내신 및 수능 완벽 대비</li>
