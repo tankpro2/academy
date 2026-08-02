@@ -5,6 +5,10 @@ const supabaseUrl = "https://ovqkukazbvwjqdxqpfvj.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92cWt1a2F6YnZ3anFkeHFwZnZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1MjEyMDksImV4cCI6MjEwMDA5NzIwOX0.fjCKRvGuJwJh6v6admjgLzqdwLY6dvgOZ1e1u-0vc9s";
 const supabaseClient = window.supabase ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
 
+// 로그인 실패 횟수 및 락아웃(Brute-Force 차단) 제어 변수
+var loginFailures = 0;
+var loginLockoutUntil = 0;
+
 // 2. 어플리케이션 상태 관리 (State)
 let state = {
   currentUser: null,          // 현재 로그인한 사용자 객체 { username, role, is_password_changed, ref_id }
@@ -300,13 +304,27 @@ async function loadAllData() {
   }
 }
 
-// 로그인 실패 횟수 및 락아웃(Brute-Force 차단) 제어 변수
-let loginFailures = 0;
-let loginLockoutUntil = 0;
+// 로컬 비밀번호 변경 오버라이드 보관 헬퍼
+function saveLocalPasswordOverride(username, password, isPasswordChanged) {
+  try {
+    let localPwMap = JSON.parse(localStorage.getItem("yuju_local_user_passwords") || "{}");
+    localPwMap[username] = { password, is_password_changed: isPasswordChanged };
+    localStorage.setItem("yuju_local_user_passwords", JSON.stringify(localPwMap));
+  } catch(e) {}
+}
+
+function getLocalPasswordOverride(username) {
+  try {
+    let localPwMap = JSON.parse(localStorage.getItem("yuju_local_user_passwords") || "{}");
+    return localPwMap[username] || null;
+  } catch(e) {
+    return null;
+  }
+}
 
 // 6. 로그인 / 비밀번호 변경 로직
 async function handleLoginSubmit(event) {
-  event.preventDefault();
+  if (event && event.preventDefault) event.preventDefault();
 
   const now = Date.now();
   if (now < loginLockoutUntil) {
@@ -320,85 +338,102 @@ async function handleLoginSubmit(event) {
     usernameInput = "유주";
   }
   const passwordInput = document.getElementById("loginPassword").value.trim();
-  
-  if (!supabaseClient) {
-    // 오프라인 모드 Fallback 로그인 처리
-    const user = (window.mockData.users || []).find(u => u.username === usernameInput);
-    if (!user) {
-      alert("등록되지 않은 사용자 이름입니다. (오프라인 모드)");
-      return;
-    }
-    if (user.password !== passwordInput) {
-      loginFailures++;
-      if (loginFailures >= 5) {
-        loginLockoutUntil = Date.now() + 5 * 60 * 1000;
-        loginFailures = 0;
-        alert("비밀번호를 5회 연속 잘못 입력하여 5분간 로그인이 제한됩니다.");
-        return;
-      }
-      alert(`비밀번호가 올바르지 않습니다. (오류 ${loginFailures}/5회)`);
-      return;
-    }
-    loginFailures = 0;
-    state.currentUser = { ...user };
-    
-    if (user.password === "1234" && !user.is_password_changed) {
-      document.getElementById("loginCard").style.display = "none";
-      document.getElementById("changePwCard").style.display = "block";
-      validateNewPassword("");
-      if (window.lucide) window.lucide.createIcons();
-    } else {
-      completeLoginSession();
-    }
+
+  if (!usernameInput) {
+    alert("사용자 이름을 입력해 주세요.");
     return;
   }
-  
-  try {
-    const { data: user, error } = await supabaseClient
-      .from("agy_users")
-      .select("*")
-      .eq("username", usernameInput)
-      .single();
+
+  // 1. 로컬 비밀번호 오버라이드 확인
+  const localPwOverride = getLocalPasswordOverride(usernameInput);
+
+  // 2. 유저 계정 탐색 (Supabase -> state.users -> mockData -> state.students/teachers -> Default Director)
+  let user = null;
+
+  if (supabaseClient) {
+    try {
+      const { data: dbUsers } = await supabaseClient
+        .from("agy_users")
+        .select("*")
+        .eq("username", usernameInput);
       
-    if (error || !user) {
-      alert("등록되지 않은 사용자 이름입니다.");
-      return;
-    }
-    
-    if (user.password !== passwordInput) {
-      loginFailures++;
-      if (loginFailures >= 5) {
-        loginLockoutUntil = Date.now() + 5 * 60 * 1000;
-        loginFailures = 0;
-        alert("비밀번호를 5회 연속 잘못 입력하여 5분간 로그인이 제한됩니다.");
-        return;
+      if (dbUsers && dbUsers.length > 0) {
+        user = dbUsers[0];
       }
-      alert(`비밀번호가 올바르지 않습니다. (오류 ${loginFailures}/5회)`);
+    } catch (e) {
+      console.warn("Supabase user fetch error:", e);
+    }
+  }
+
+  if (!user && state.users) {
+    user = state.users.find(u => u.username === usernameInput);
+  }
+
+  if (!user && window.mockData && window.mockData.users) {
+    user = window.mockData.users.find(u => u.username === usernameInput);
+  }
+
+  if (!user && state.students) {
+    const st = state.students.find(s => s.name === usernameInput);
+    if (st) {
+      user = { username: usernameInput, password: "1234", role: "student", is_password_changed: false, ref_id: st.id };
+    }
+  }
+
+  if (!user && state.teachers) {
+    const tc = state.teachers.find(t => t.name === usernameInput);
+    if (tc) {
+      user = { username: usernameInput, password: "1234", role: "teacher", is_password_changed: false, ref_id: tc.id };
+    }
+  }
+
+  if (!user && (usernameInput === "유주" || usernameInput === "김유주")) {
+    user = { username: "유주", password: "1234", role: "director", is_password_changed: false, ref_id: null };
+  }
+
+  if (!user) {
+    alert(`[${usernameInput}] 등록되지 않은 사용자 이름입니다. 이름을 다시 확인해 주세요.`);
+    return;
+  }
+
+  // 객체 복사 및 로컬 오버라이드 반영
+  user = { ...user };
+  if (localPwOverride) {
+    user.password = localPwOverride.password;
+    user.is_password_changed = localPwOverride.is_password_changed;
+  }
+
+  // 비밀번호 검증
+  if (user.password !== passwordInput) {
+    loginFailures++;
+    if (loginFailures >= 5) {
+      loginLockoutUntil = Date.now() + 5 * 60 * 1000;
+      loginFailures = 0;
+      alert("비밀번호를 5회 연속 잘못 입력하여 5분간 로그인이 제한됩니다.");
       return;
     }
-    
-    // 로그인 성공 시
-    loginFailures = 0;
-    state.currentUser = { ...user };
-    
-    // 만약 비밀번호가 초기값 '1234' 이거나 아직 변경한 적이 없는 경우 -> 강제 변경 카드 노출
-    if (user.password === "1234" && !user.is_password_changed) {
-      document.getElementById("loginCard").style.display = "none";
-      document.getElementById("changePwCard").style.display = "block";
-      validateNewPassword(""); // 가이드 초기화
-      if (window.lucide) window.lucide.createIcons();
-    } else {
-      // 변경 이력이 있으면 바로 메인 진입
-      completeLoginSession();
-    }
-  } catch (err) {
-    console.error("로그인 처리 중 에러:", err);
+    alert(`비밀번호가 올바르지 않습니다. (오류 ${loginFailures}/5회)`);
+    return;
+  }
+
+  // 로그인 성공 시
+  loginFailures = 0;
+  state.currentUser = { ...user };
+
+  if (user.password === "1234" && !user.is_password_changed) {
+    const loginCard = document.getElementById("loginCard");
+    const changePwCard = document.getElementById("changePwCard");
+    if (loginCard) loginCard.style.display = "none";
+    if (changePwCard) changePwCard.style.display = "block";
+    validateNewPassword("");
+    if (window.lucide) window.lucide.createIcons();
+  } else {
+    completeLoginSession();
   }
 }
 
 function completeLoginSession() {
   if (state.currentUser) {
-    // 보안: 메모리 및 localStorage 저장 시 비밀번호(password) 평문 필드 완전 삭제
     const safeUser = { ...state.currentUser };
     delete safeUser.password;
     
@@ -407,18 +442,30 @@ function completeLoginSession() {
     } catch (e) {
       console.warn("localStorage is not available:", e);
     }
-    delete state.currentUser.password;
   }
-  document.getElementById("loginScreen").style.display = "none";
-  document.getElementById("appScreen").style.display = "flex";
+
+  const loginScreen = document.getElementById("loginScreen");
+  const appScreen = document.getElementById("appScreen");
+  const publicScreen = document.getElementById("publicHomepageScreen");
+  const mobileScreen = document.getElementById("mobileLandingScreen");
+
+  if (loginScreen) loginScreen.style.display = "none";
+  if (publicScreen) publicScreen.style.display = "none";
+  if (mobileScreen) mobileScreen.style.display = "none";
+  if (appScreen) appScreen.style.display = "flex";
   
-  document.getElementById("profileName").innerText = state.currentUser.username;
-  document.getElementById("profileRole").innerText = getRoleKorean(state.currentUser.role);
+  if (state.currentUser) {
+    const pName = document.getElementById("profileName");
+    const pRole = document.getElementById("profileRole");
+    if (pName) pName.innerText = state.currentUser.username;
+    if (pRole) pRole.innerText = getRoleKorean(state.currentUser.role);
+  }
   
-  loadAllData().then(() => {
-    renderSidebarMenu();
-    navigate("dashboard");
-  });
+  renderSidebarMenu();
+  navigate("dashboard");
+
+  // 백그라운드 최신 데이터 동기화
+  loadAllData().catch(err => console.warn("Background loadAllData error:", err));
 }
 
 // 비밀번호 규칙 실시간 실효성 체크
@@ -489,18 +536,25 @@ function checkPwMatch() {
 async function handleChangePwSubmit(event) {
   event.preventDefault();
   const newPw = document.getElementById("newPassword").value;
+  const username = state.currentUser.username;
   
-  try {
-    const { error } = await supabaseClient
-      .from("agy_users")
-      .update({ password: newPw, is_password_changed: true })
-      .eq("username", state.currentUser.username);
-      
-    if (error) {
-      alert("비밀번호 변경 중 오류가 발생했습니다. 다시 시도해 주세요.");
-      return;
+  saveLocalPasswordOverride(username, newPw, true);
+  if (window.mockData && window.mockData.users) {
+    const mockU = window.mockData.users.find(u => u.username === username);
+    if (mockU) {
+      mockU.password = newPw;
+      mockU.is_password_changed = true;
     }
-    
+  }
+
+  try {
+    if (supabaseClient) {
+      await supabaseClient
+        .from("agy_users")
+        .update({ password: newPw, is_password_changed: true })
+        .eq("username", username);
+    }
+      
     alert("비밀번호가 성공적으로 변경되었습니다.");
     state.currentUser.password = newPw;
     state.currentUser.is_password_changed = true;
@@ -509,6 +563,199 @@ async function handleChangePwSubmit(event) {
     console.error("비밀번호 저장 중 오류:", err);
   }
 }
+
+// 사용자 비밀번호 직접 변경 모달 (원장/선생님/학생 공통)
+function openChangePasswordModal() {
+  if (!state.currentUser) return;
+  const username = state.currentUser.username;
+  const roleName = state.currentUser.role === 'director' ? '원장' : (state.currentUser.role === 'teacher' ? '강사' : '학생');
+
+  openModal(`
+    <div class="modal-header">
+      <h3>🔑 ${roleName} [${escapeHTML(username)}] 비밀번호 변경</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="directorChangePwForm" onsubmit="event.preventDefault(); submitChangePasswordModal();" style="display:flex; flex-direction:column; gap:14px;">
+        <div class="form-group" style="margin-bottom:0;">
+          <label style="font-size:13px; font-weight:600; color:var(--text-dark);">새 비밀번호</label>
+          <input type="password" id="modalNewPw" placeholder="새 비밀번호를 입력하세요" required style="width:100%; padding:10px; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label style="font-size:13px; font-weight:600; color:var(--text-dark);">새 비밀번호 확인</label>
+          <input type="password" id="modalConfirmPw" placeholder="새 비밀번호를 다시 입력하세요" required style="width:100%; padding:10px; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+        </div>
+        <button type="submit" class="btn btn-emerald" style="width:100%; padding:10px; justify-content:center; font-weight:700;">비밀번호 변경 완료</button>
+      </form>
+    </div>
+  `);
+}
+window.openChangePasswordModal = openChangePasswordModal;
+
+async function submitChangePasswordModal() {
+  const newPw = document.getElementById("modalNewPw").value;
+  const confirmPw = document.getElementById("modalConfirmPw").value;
+  const username = state.currentUser.username;
+
+  if (newPw !== confirmPw) {
+    alert("새 비밀번호가 일치하지 않습니다.");
+    return;
+  }
+
+  if (newPw.length < 4) {
+    alert("비밀번호는 최소 4자 이상 입력해 주세요.");
+    return;
+  }
+
+  saveLocalPasswordOverride(username, newPw, true);
+  if (window.mockData && window.mockData.users) {
+    const mockU = window.mockData.users.find(u => u.username === username);
+    if (mockU) {
+      mockU.password = newPw;
+      mockU.is_password_changed = true;
+    }
+  }
+
+  try {
+    if (supabaseClient) {
+      await supabaseClient
+        .from("agy_users")
+        .update({ password: newPw, is_password_changed: true })
+        .eq("username", username);
+    }
+
+    state.currentUser.password = newPw;
+    state.currentUser.is_password_changed = true;
+    const userInState = state.users.find(u => u.username === username);
+    if (userInState) {
+      userInState.password = newPw;
+      userInState.is_password_changed = true;
+    }
+
+    closeModal();
+    alert("비밀번호가 성공적으로 변경되었습니다.");
+  } catch (err) {
+    console.error("비밀번호 변경 실패:", err);
+    alert("비밀번호 변경 중 오류가 발생했습니다.");
+  }
+}
+window.submitChangePasswordModal = submitChangePasswordModal;
+
+// 원장 전용: 학생 비밀번호 초기화 (1234)
+async function resetStudentPassword(studentId) {
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) {
+    alert("학생 정보를 찾을 수 없습니다.");
+    return;
+  }
+
+  if (!confirm(`[${student.name}] 학생 계정의 비밀번호를 초기 비밀번호 '1234'로 초기화하시겠습니까?`)) {
+    return;
+  }
+
+  const username = student.name;
+
+  // 1. 로컬 저장소 및 메모리 state 즉시 반영
+  saveLocalPasswordOverride(username, "1234", false);
+
+  if (window.mockData && window.mockData.users) {
+    const mockU = window.mockData.users.find(u => u.username === username || u.ref_id === studentId);
+    if (mockU) {
+      mockU.password = "1234";
+      mockU.is_password_changed = false;
+    }
+  }
+
+  const user = state.users.find(u => u.ref_id === studentId || u.username === username);
+  if (user) {
+    user.password = "1234";
+    user.is_password_changed = false;
+  }
+
+  // 2. Supabase DB 업데이트 및 upsert 보장
+  if (supabaseClient) {
+    try {
+      const { data } = await supabaseClient
+        .from("agy_users")
+        .update({ password: "1234", is_password_changed: false })
+        .eq("username", username)
+        .select();
+
+      if (!data || data.length === 0) {
+        await supabaseClient.from("agy_users").upsert([{
+          username: username,
+          password: "1234",
+          role: "student",
+          is_password_changed: false,
+          ref_id: studentId
+        }]);
+      }
+    } catch (e) {
+      console.error("학생 비밀번호 DB 초기화 중 오류 (로컬 초기화는 반영됨):", e);
+    }
+  }
+
+  alert(`[${student.name}] 학생 계정의 비밀번호가 '1234'로 초기화되었습니다.`);
+}
+window.resetStudentPassword = resetStudentPassword;
+
+// 원장 전용: 강사 비밀번호 초기화 (1234)
+async function resetTeacherPassword(teacherId) {
+  const teacher = state.teachers.find(t => t.id === teacherId);
+  if (!teacher) {
+    alert("강사 정보를 찾을 수 없습니다.");
+    return;
+  }
+
+  if (!confirm(`[${teacher.name}] 강사 계정의 비밀번호를 초기 비밀번호 '1234'로 초기화하시겠습니까?`)) {
+    return;
+  }
+
+  const username = teacher.name;
+
+  // 1. 로컬 저장소 및 메모리 state 즉시 반영
+  saveLocalPasswordOverride(username, "1234", false);
+
+  if (window.mockData && window.mockData.users) {
+    const mockU = window.mockData.users.find(u => u.username === username || u.ref_id === teacherId);
+    if (mockU) {
+      mockU.password = "1234";
+      mockU.is_password_changed = false;
+    }
+  }
+
+  const user = state.users.find(u => u.ref_id === teacherId || u.username === username);
+  if (user) {
+    user.password = "1234";
+    user.is_password_changed = false;
+  }
+
+  // 2. Supabase DB 업데이트 및 upsert 보장
+  if (supabaseClient) {
+    try {
+      const { data } = await supabaseClient
+        .from("agy_users")
+        .update({ password: "1234", is_password_changed: false })
+        .eq("username", username)
+        .select();
+
+      if (!data || data.length === 0) {
+        await supabaseClient.from("agy_users").upsert([{
+          username: username,
+          password: "1234",
+          role: "teacher",
+          is_password_changed: false,
+          ref_id: teacherId
+        }]);
+      }
+    } catch (e) {
+      console.error("강사 비밀번호 DB 초기화 중 오류 (로컬 초기화는 반영됨):", e);
+    }
+  }
+
+  alert(`[${teacher.name}] 강사 계정의 비밀번호가 '1234'로 초기화되었습니다.`);
+}
+window.resetTeacherPassword = resetTeacherPassword;
 
 function handleLogout() {
   if (confirm("로그아웃 하시겠습니까?")) {
@@ -1375,9 +1622,14 @@ function renderStudentList() {
           </div>
         </td>
         <td>
-          ${state.currentUser.role === 'director' || state.currentUser.role === 'assistant' ? `
-            <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="openEditStudentModal('${s.id}')">수정</button>
-          ` : `<span style="font-size:12px; color:var(--text-muted);">조회전용</span>`}
+          <div style="display:flex; gap:4px; align-items:center;">
+            ${state.currentUser.role === 'director' || state.currentUser.role === 'assistant' ? `
+              <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="openEditStudentModal('${s.id}')">수정</button>
+            ` : `<span style="font-size:12px; color:var(--text-muted);">조회전용</span>`}
+            ${state.currentUser.role === 'director' ? `
+              <button class="btn" style="padding:4px 8px; font-size:11px; background:var(--accent-gold); color:var(--text-dark); border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="resetStudentPassword('${s.id}')">🔑 비번초기화</button>
+            ` : ''}
+          </div>
         </td>
       </tr>
     `;
@@ -2003,9 +2255,14 @@ function renderTeacherReg() {
       <td>${t.birthday}</td>
       ${isDirector ? `
         <td style="text-align:center;">
-          <button class="btn" style="padding: 4px 8px; font-size:11px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="deleteTeacherRecord('${t.id}')">
-            🗑️ 삭제
-          </button>
+          <div style="display:flex; gap:4px; justify-content:center;">
+            <button class="btn" style="padding: 4px 8px; font-size:11px; background:var(--accent-gold); color:var(--text-dark); border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="resetTeacherPassword('${t.id}')">
+              🔑 비번초기화
+            </button>
+            <button class="btn" style="padding: 4px 8px; font-size:11px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="deleteTeacherRecord('${t.id}')">
+              🗑️ 삭제
+            </button>
+          </div>
         </td>
       ` : ''}
     </tr>
