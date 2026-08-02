@@ -779,6 +779,20 @@ function renderOperations() {
     `;
   }
 
+  const currentControlStudentId = state.selectedControlStudentId || enrollSelectedStudentId || (state.students[0] ? state.students[0].id : null);
+  const opsStudentOptions = state.students.map(s => {
+    const isSelected = s.id === currentControlStudentId;
+    const statusText = s.isEditAllowed === true ? " [수강 허용]" : (s.isEditAllowed === false ? " [수강 통제]" : "");
+    return `<option value="${s.id}" ${isSelected ? 'selected' : ''}>${s.name}${statusText}</option>`;
+  }).join("");
+  const currentControlStudent = state.students.find(s => s.id === currentControlStudentId);
+  let isIndividualAllowed = false;
+  if (currentControlStudent && currentControlStudent.isEditAllowed !== undefined && currentControlStudent.isEditAllowed !== null) {
+    isIndividualAllowed = !!currentControlStudent.isEditAllowed;
+  } else {
+    isIndividualAllowed = !!monthData.allowEnrollment;
+  }
+
   container.innerHTML = `
     <div class="page-header">
       <div class="page-title">
@@ -798,6 +812,17 @@ function renderOperations() {
         <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
           <span style="font-size:12px; font-weight:700; color:var(--text-dark);">수강신청 허용 (해당 월 전체 학생):</span>
           <input type="checkbox" id="allowOpsEnrollmentToggle" onchange="toggleMonthlyEnrollmentAccess(this.checked)" style="width:18px; height:18px; cursor:pointer;" ${monthData.allowEnrollment ? 'checked' : ''}>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+          <span style="font-size:12px; font-weight:700; color:var(--text-dark);">👤 개별 학생 수강 통제:</span>
+          <select id="opsIndividualStudentSelector" onchange="onOpsStudentControlChange(this.value)" style="padding:4px 8px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-size:12px; font-weight:700; cursor:pointer;">
+            ${opsStudentOptions}
+          </select>
+          <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:700; cursor:pointer; margin-left:4px;">
+            <input type="checkbox" id="opsIndividualStudentToggle" onchange="toggleIndividualStudentAccess(this.checked)" style="width:16px; height:16px; cursor:pointer;" ${isIndividualAllowed ? 'checked' : ''}>
+            <span>수강 허용</span>
+          </label>
         </div>
 
         <button class="btn btn-secondary" onclick="applyWeeklyTemplate()"><i data-lucide="copy"></i> 주간 템플릿 적용</button>
@@ -2185,20 +2210,22 @@ async function deleteTeacherSchedule(id) {
 }
 
 // 3. 근무 일지 작성 및 원장 확정 (월간 총 시간 집계 콤보)
-let logSelectedMonth = "2026-07"; // 기본 통계 조회 월
+let teacherStatsStartDate = "2026-07-01"; // 기본 통계 조회 시작일
+let teacherStatsEndDate = "2026-08-31";   // 기본 통계 조회 종료일
 
 function renderTeacherLogs() {
   const target = document.getElementById("teacherTabContent");
   
-  // (1) 월별 총 시간 집계 테이블 생성
+  // (1) 선택 기간 내 확정 근무일지 선별 및 강사별 통계 합산
   let totalHoursHTML = "";
+  const periodLabel = `${teacherStatsStartDate} ~ ${teacherStatsEndDate}`;
   
   state.teachers.forEach(t => {
-    // 특정 강사의 선택된 월(logSelectedMonth)의 확정된 근무일지 선별
     const confirmedLogs = state.teacherWorkLogs.filter(log => {
-      return log.teacherId === t.id && 
-             log.date.startsWith(logSelectedMonth) && 
-             log.isConfirmed;
+      const logDate = log.date;
+      const isAfterStart = !teacherStatsStartDate || logDate >= teacherStatsStartDate;
+      const isBeforeEnd = !teacherStatsEndDate || logDate <= teacherStatsEndDate;
+      return log.teacherId === t.id && log.isConfirmed && isAfterStart && isBeforeEnd;
     });
     
     let totalMinutes = 0;
@@ -2213,26 +2240,29 @@ function renderTeacherLogs() {
     totalHoursHTML += `
       <tr>
         <td><strong>${escapeHTML(t.name)}</strong></td>
-        <td>${logSelectedMonth}</td>
+        <td><span class="badge badge-emerald" style="font-size:12px; padding:3px 8px;">${periodLabel}</span></td>
+        <td><strong>${confirmedLogs.length} 일</strong></td>
         <td><strong style="color:var(--primary-color); font-size:16px;">${displayHours} 시간</strong></td>
         <td>(${totalMinutes} 분)</td>
       </tr>
     `;
   });
 
-  // (2) 일자별 근무일지 폼 구성
-  let logRowsHTML = "";
+  // (2) 일자별 근무일지 목록 구성 (선택 기간 적용)
+  let filteredLogs = state.teacherWorkLogs.filter(l => {
+    const logDate = l.date;
+    const isAfterStart = !teacherStatsStartDate || logDate >= teacherStatsStartDate;
+    const isBeforeEnd = !teacherStatsEndDate || logDate <= teacherStatsEndDate;
+    return isAfterStart && isBeforeEnd;
+  });
   
-  // 로그인한 역할이 강사인 경우 자신의 일지만, 원장인 경우 전체 강사 일지가 보임
-  let filteredLogs = [...state.teacherWorkLogs];
   if (state.currentUser.role === 'teacher') {
     filteredLogs = filteredLogs.filter(l => l.teacherId === state.currentUser.ref_id);
   }
   
-  // 날짜 역순
   filteredLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
   
-  logRowsHTML = filteredLogs.map(log => {
+  let logRowsHTML = filteredLogs.map(log => {
     const tc = state.teachers.find(t => t.id === log.teacherId);
     if (!tc) return "";
     
@@ -2273,7 +2303,7 @@ function renderTeacherLogs() {
   }).join("");
 
   if (logRowsHTML === "") {
-    logRowsHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:20px;">등록 및 청구된 실제 근무 일지가 없습니다.</td></tr>`;
+    logRowsHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:20px;">선택하신 기간 내 청구/결재된 근무 일지가 없습니다.</td></tr>`;
   }
 
   // (3) 일지 작성 기능 바 (자신이 강사인 경우에만 출근일지 작성 패널 활성화)
@@ -2306,14 +2336,18 @@ function renderTeacherLogs() {
   }
 
   target.innerHTML = `
-    <!-- 월간 통계 합산 패널 (원장/강사 공통) -->
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <h3 style="font-weight:800; font-size:16px;">📊 월별 강사 총 실근무 합계</h3>
-      <select id="logMonthSelector" onchange="changeLogMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm);">
-        <option value="2026-07" ${logSelectedMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
-        <option value="2026-08" ${logSelectedMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
-        <option value="2026-09" ${logSelectedMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
-      </select>
+    <!-- 기간별 통계 합산 패널 (원장/강사 공통) -->
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+      <h3 style="font-weight:800; font-size:16px;">📊 기간별 강사 총 실근무 통계</h3>
+      <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 14px; border:1px solid var(--border-color); border-radius:var(--radius-md); flex-wrap:wrap;">
+        <span style="font-size:12px; font-weight:700; color:var(--text-dark);">조회 기간:</span>
+        <input type="date" id="teacherStatsStart" value="${teacherStatsStartDate}" onchange="changeTeacherStatsPeriod()" style="padding:5px 8px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:12px; font-weight:700;">
+        <span style="font-size:12px; font-weight:700; color:var(--text-muted);">~</span>
+        <input type="date" id="teacherStatsEnd" value="${teacherStatsEndDate}" onchange="changeTeacherStatsPeriod()" style="padding:5px 8px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:12px; font-weight:700;">
+        <button class="btn btn-emerald" style="padding:5px 10px; font-size:12px; font-weight:700;" onclick="changeTeacherStatsPeriod()">🔍 기간 조회</button>
+        <button class="btn btn-secondary" style="padding:5px 8px; font-size:11px;" onclick="setTeacherStatsPreset('thisMonth')">이번달</button>
+        <button class="btn btn-secondary" style="padding:5px 8px; font-size:11px;" onclick="setTeacherStatsPreset('all')">전체</button>
+      </div>
     </div>
     
     <div class="card" style="margin-bottom:30px;">
@@ -2322,7 +2356,8 @@ function renderTeacherLogs() {
           <thead>
             <tr>
               <th>강사명</th>
-              <th>해당월</th>
+              <th>조회 기간</th>
+              <th>근무 일수</th>
               <th>총 근무시간 (원장 최종 확정분 기준)</th>
               <th>상세 분</th>
             </tr>
@@ -2337,7 +2372,7 @@ function renderTeacherLogs() {
     ${addLogFormHTML}
     
     <!-- 근무일지 목록 & 확정 액션 -->
-    <h3 style="font-weight:800; font-size:16px; margin:30px 0 16px;">📋 강사 실제 출퇴근 제출부 및 확정 결재</h3>
+    <h3 style="font-weight:800; font-size:16px; margin:30px 0 16px;">📋 강사 실제 출퇴근 제출부 및 확정 결재 (${periodLabel})</h3>
     <div class="card">
       <div class="table-responsive">
         <table class="yuju-table">
@@ -2362,6 +2397,39 @@ function renderTeacherLogs() {
   `;
   if (window.lucide) window.lucide.createIcons();
 }
+
+function changeTeacherStatsPeriod() {
+  const startEl = document.getElementById("teacherStatsStart");
+  const endEl = document.getElementById("teacherStatsEnd");
+  if (startEl && startEl.value) teacherStatsStartDate = startEl.value;
+  if (endEl && endEl.value) teacherStatsEndDate = endEl.value;
+  
+  if (teacherStatsStartDate > teacherStatsEndDate) {
+    alert("시작일이 종료일보다 늦을 수 없습니다.");
+    return;
+  }
+  renderTeacherLogs();
+}
+
+function setTeacherStatsPreset(preset) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+
+  if (preset === 'thisMonth') {
+    teacherStatsStartDate = `${year}-${month}-01`;
+    teacherStatsEndDate = `${year}-${month}-${String(lastDay).padStart(2, "0")}`;
+  } else if (preset === 'all') {
+    teacherStatsStartDate = "2026-01-01";
+    teacherStatsEndDate = "2026-12-31";
+  }
+  renderTeacherLogs();
+}
+
+window.changeTeacherStatsPeriod = changeTeacherStatsPeriod;
+window.setTeacherStatsPreset = setTeacherStatsPreset;
+
 
 function changeLogMonth(ym) {
   logSelectedMonth = ym;
@@ -2997,6 +3065,21 @@ function renderStudentEnrollments() {
   // 스캔본 첨부 여부 확인
   const hasScan = state.calendarScans && state.calendarScans[`${enrollSelectedStudentId}_${opsYearMonth}`];
   const isStudent = state.currentUser.role === 'student';
+  const monthData = (state.monthlyOperations && state.monthlyOperations[opsYearMonth]) || {};
+
+  const currentControlStudentId = state.selectedControlStudentId || enrollSelectedStudentId || (state.students[0] ? state.students[0].id : null);
+  const opsStudentOptions = state.students.map(s => {
+    const isSelected = s.id === currentControlStudentId;
+    const statusText = s.isEditAllowed === true ? " [수강 허용]" : (s.isEditAllowed === false ? " [수강 통제]" : "");
+    return `<option value="${s.id}" ${isSelected ? 'selected' : ''}>${s.name}${statusText}</option>`;
+  }).join("");
+  const currentControlStudent = state.students.find(s => s.id === currentControlStudentId);
+  let isIndividualAllowed = false;
+  if (currentControlStudent && currentControlStudent.isEditAllowed !== undefined && currentControlStudent.isEditAllowed !== null) {
+    isIndividualAllowed = !!currentControlStudent.isEditAllowed;
+  } else {
+    isIndividualAllowed = !!monthData.allowEnrollment;
+  }
 
   container.innerHTML = `
     <div class="page-header">
@@ -3007,8 +3090,18 @@ function renderStudentEnrollments() {
       <div class="action-bar" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
         ${state.currentUser.role === 'director' ? `
           <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
-            <span style="font-size:12px; font-weight:700;">학생 수강 수정 허용:</span>
-            <input type="checkbox" id="allowEditToggle" onchange="toggleStudentEditAccess()" style="width:18px; height:18px; cursor:pointer;">
+            <span style="font-size:12px; font-weight:700;">수강신청 허용 (해당 월 전체 학생):</span>
+            <input type="checkbox" id="allowOpsEnrollmentToggle" onchange="toggleMonthlyEnrollmentAccess(this.checked)" style="width:18px; height:18px; cursor:pointer;" ${monthData.allowEnrollment ? 'checked' : ''}>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+            <span style="font-size:12px; font-weight:700; color:var(--text-dark);">👤 개별 학생 수강 통제:</span>
+            <select id="opsIndividualStudentSelector" onchange="onOpsStudentControlChange(this.value)" style="padding:4px 8px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-size:12px; font-weight:700; cursor:pointer;">
+              ${opsStudentOptions}
+            </select>
+            <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:700; cursor:pointer; margin-left:4px;">
+              <input type="checkbox" id="opsIndividualStudentToggle" onchange="toggleIndividualStudentAccess(this.checked)" style="width:16px; height:16px; cursor:pointer;" ${isIndividualAllowed ? 'checked' : ''}>
+              <span>수강 허용</span>
+            </label>
           </div>
         ` : ''}
       </div>
@@ -3333,7 +3426,7 @@ async function applyWeeklyScheduleToMonth() {
 
     // 개별 날짜 가동 운영시간 유효성 한 번 더 교차 검증
     if ((op.start && match.start < op.start) || (op.end && match.end > op.end)) {
-      alert(`${dateStr} (${dayNames[dayOfWeek]})의 운영 가능 시간(${op.start || "13:00"} ~ ${op.end || "22:00"}) 범위를 벗어나 수강 신청할 수 없습니다.`);
+      alert(`운영시간 내에서만 수강 신청이 가능합니다.\n[${dateStr} (${dayNames[dayOfWeek]}) 운영시간: ${op.start || "13:00"} ~ ${op.end || "22:00"}]`);
       return;
     }
 
@@ -3398,9 +3491,54 @@ function toggleTimetableMode(mode) {
   renderEnrollments();
 }
 
+// 원장이 개별 학생 수강신청 통제/허용 제어
+function onOpsStudentControlChange(stId) {
+  state.selectedControlStudentId = stId;
+  const target = state.students.find(s => s.id === stId);
+  const toggle = document.getElementById("opsIndividualStudentToggle");
+  const monthData = (state.monthlyOperations && state.monthlyOperations[opsYearMonth]) || {};
+  if (toggle && target) {
+    if (target.isEditAllowed !== undefined && target.isEditAllowed !== null) {
+      toggle.checked = !!target.isEditAllowed;
+    } else {
+      toggle.checked = !!monthData.allowEnrollment;
+    }
+  }
+}
+
+async function toggleIndividualStudentAccess(checked) {
+  const selectEl = document.getElementById("opsIndividualStudentSelector");
+  const stId = selectEl ? selectEl.value : (state.selectedControlStudentId || enrollSelectedStudentId || (state.students[0] && state.students[0].id));
+  const targetStudent = state.students.find(s => s.id === stId);
+  if (!targetStudent) return;
+
+  targetStudent.isEditAllowed = checked;
+  state.selectedControlStudentId = stId;
+
+  try {
+    const { error } = await supabaseClient.from("agy_students").update({ data: targetStudent }).eq("id", targetStudent.id);
+    if (!error) {
+      alert(`[${targetStudent.name}] 학생의 수강신청 상태가 [${checked ? '허용' : '통제(차단)'}]으로 설정되었습니다.`);
+    }
+  } catch (err) {
+    console.error(err);
+    alert(`[${targetStudent.name}] 학생의 수강신청 상태가 [${checked ? '허용' : '통제(차단)'}]으로 설정되었습니다.`);
+  }
+
+  await loadAllData();
+  if (state.currentView === 'operations') {
+    renderOperations();
+  } else if (state.currentView === 'studentEnrollments' || state.currentView === 'enrollments') {
+    renderStudentEnrollments();
+  }
+}
+
+window.onOpsStudentControlChange = onOpsStudentControlChange;
+window.toggleIndividualStudentAccess = toggleIndividualStudentAccess;
+
 // 원장이 학생 개별 수강신청 권한 변경 제어
 async function toggleStudentEditAccess() {
-  const allowed = document.getElementById("allowEditToggle").checked;
+  const allowed = document.getElementById("allowEditToggle") ? document.getElementById("allowEditToggle").checked : true;
   const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
   if (!targetStudent) return;
   
@@ -3419,7 +3557,7 @@ async function toggleStudentEditAccess() {
 // 캘린더 날짜 클릭 시 수강신청 등록/수정/삭제 모달창
 function handleCalendarDateClick(dateStr, isHoliday) {
   if (isHoliday) {
-    alert("지정된 학원 휴무일에는 수강을 신청할 수 없습니다.");
+    alert("휴원일이라 신청이 안됩니다.");
     return;
   }
   
@@ -3593,7 +3731,7 @@ async function saveStudentEnrollmentLocal(dateStr) {
   const op = state.monthlyOperations[opsYearMonth]?.[dateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
 
   if (op.isHoliday) {
-    alert("지정된 학원 휴무일에는 수강을 신청할 수 없습니다.");
+    alert("휴원일이라 신청이 안됩니다.");
     return;
   }
   
@@ -3603,7 +3741,7 @@ async function saveStudentEnrollmentLocal(dateStr) {
   }
   
   if (startTime < op.start || endTime > op.end) {
-    alert(`이 날의 수강 신청 가능 시간은 ${op.start} ~ ${op.end} 입니다.`);
+    alert(`운영시간 내에서만 수강 신청이 가능합니다.\n(해당 날짜 운영시간: ${op.start} ~ ${op.end})`);
     return;
   }
 
@@ -3694,15 +3832,21 @@ async function handleSaveEnrollment(dateStr) {
     }
   }
   
-  // 시간 유효성 확인
-  const isTimeInvalid = targetDates.some(dt => {
+  // 시간 유효성 및 휴무일 확인
+  const holidayDate = targetDates.find(dt => (monthOps[dt] || {}).isHoliday);
+  if (holidayDate) {
+    alert("휴원일이라 신청이 안됩니다.");
+    return;
+  }
+
+  const invalidTimeDate = targetDates.find(dt => {
     const op = monthOps[dt] || { isHoliday: false, start: "13:00", end: "22:00" };
-    if (op.isHoliday) return true;
     return startTime < op.start || endTime > op.end;
   });
   
-  if (isTimeInvalid) {
-    alert("신청 시간 오류: 휴무일이거나 설정된 학원 운영시간 범위를 초과하여 수강 일정을 예약할 수 없습니다.");
+  if (invalidTimeDate) {
+    const op = monthOps[invalidTimeDate] || { start: "13:00", end: "22:00" };
+    alert(`운영시간 내에서만 수강 신청이 가능합니다.\n(해당 날짜 운영시간: ${op.start} ~ ${op.end})`);
     return;
   }
   
@@ -5423,7 +5567,7 @@ window.renderStudentEnrollments = renderStudentEnrollments;
 
 // 휴원일 알림 (인라인 onclick에서 한글 처리 오류 방지용 전역 함수)
 function showHolidayAlert() {
-  alert('학원 휴원일입니다.\n수강 신청을 할 수 없습니다.');
+  alert('휴원일이라 신청이 안됩니다.');
 }
 window.showHolidayAlert = showHolidayAlert;
 
