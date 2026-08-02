@@ -837,25 +837,71 @@ table.yuju-table tr:hover td {
 }
 
 /* 인쇄용 최적화 */
+/* 당일진도계획/실적관리 출력물 하단 노트 가로줄 피드백 영역 */
+.progress-print-notebook {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 2px solid var(--border-color, #cbd5e1);
+  width: 100%;
+}
+
+.notebook-header {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-dark, #1e293b);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notebook-lines-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #cbd5e1;
+}
+
+.notebook-line {
+  height: 32px;
+  border-bottom: 1px solid #e2e8f0;
+  width: 100%;
+}
+
 @media print {
-  body {
-    background: white;
-    color: black;
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm;
   }
-  .no-print, .sidebar, .role-switcher-bar, .action-bar, .page-title p, .btn, .tabs-navigation {
+  html, body {
+    background: white !important;
+    color: black !important;
+    height: 100% !important;
+    overflow: hidden !important;
+  }
+  .no-print, .sidebar, .role-switcher-bar, .action-bar, .page-header, .page-title, .btn, .tabs-navigation {
     display: none !important;
   }
-  .app-container {
-    display: block;
-  }
-  .main-content {
+  .app-container, .main-content {
+    display: block !important;
+    height: 100% !important;
     padding: 0 !important;
+    margin: 0 !important;
     overflow: visible !important;
   }
-  .card {
+  .card.progress-print-card {
     border: none !important;
     box-shadow: none !important;
     padding: 0 !important;
+    margin: 0 !important;
+    height: 97vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    box-sizing: border-box !important;
+  }
+  .plan-card {
+    margin-bottom: 6px !important;
+    padding: 6px 10px !important;
   }
   .timetable-grid-container, table.yuju-table {
     border: 1px solid black !important;
@@ -864,6 +910,45 @@ table.yuju-table tr:hover td {
   .timetable-grid-table th, .timetable-grid-table td, table.yuju-table th, table.yuju-table td {
     border: 1px solid black !important;
     color: black !important;
+  }
+  .progress-print-notebook {
+    margin-top: 10px !important;
+    padding-top: 6px !important;
+    border-top: 2px solid #000 !important;
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .notebook-header {
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    color: #000 !important;
+    margin-bottom: 4px !important;
+  }
+  .notebook-lines-container {
+    flex: 1 !important;
+    width: 100% !important;
+    border-top: 1.5px solid #000 !important;
+    border-bottom: 1px solid #475569 !important;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 27px,
+      #475569 27px,
+      #475569 28px
+    ) !important;
+  }
+  .notebook-line {
+    height: 28px !important;
+    border-bottom: 1px solid #64748b !important;
+    width: 100% !important;
+  }
+  input, select {
+    border: 1px solid #64748b !important;
+    background: transparent !important;
+    color: #000 !important;
   }
 }
 

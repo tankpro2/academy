@@ -81,6 +81,10 @@ async function initializeApp() {
     try {
       const parsed = JSON.parse(cachedUser);
       if (parsed && parsed.username && parsed.role) {
+        if (parsed.username === "김유주") {
+          parsed.username = "유주";
+          try { localStorage.setItem("yuju_logged_user", JSON.stringify(parsed)); } catch (e) {}
+        }
         state.currentUser = parsed;
         parseSuccess = true;
       } else {
@@ -203,6 +207,10 @@ async function loadAllData() {
     return;
   }
   try {
+    // 원장 ID 자동 마이그레이션 (김유주 -> 유주)
+    try {
+      await supabaseClient.from("agy_users").update({ username: "유주" }).eq("username", "김유주");
+    } catch (e) {}
     const [
       resStudents,
       resTeachers,
@@ -279,7 +287,10 @@ async function handleLoginSubmit(event) {
     return;
   }
 
-  const usernameInput = document.getElementById("loginUsername").value.trim();
+  let usernameInput = document.getElementById("loginUsername").value.trim();
+  if (usernameInput === "김유주") {
+    usernameInput = "유주";
+  }
   const passwordInput = document.getElementById("loginPassword").value.trim();
   
   if (!supabaseClient) {
@@ -3988,7 +3999,7 @@ function renderProgress() {
   `).join("");
 
   container.innerHTML = `
-    <div class="page-header">
+    <div class="page-header no-print">
       <div class="page-title">
         <h1>당일 진도 계획 / 실적 관리</h1>
         <p>등원 시 계획을 등록하고, 퇴실 시 실적을 기입하여 최종 확정 인쇄합니다.</p>
@@ -4065,6 +4076,32 @@ function renderProgressTabContent(studentId) {
   const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
   const isStudent = state.currentUser.role === 'student';
   
+  // 출력물 하단 노트를 위한 가로줄 영역 (페이지 끝까지 100% 확장)
+  const notebookLinesHTML = `
+    <div class="progress-print-notebook">
+      <div class="notebook-header">
+        ✍️ <strong>수업 메모 & 원장/강사 피드백 노트 (자유 작성란)</strong>
+      </div>
+      <div class="notebook-lines-container">
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+        <div class="notebook-line"></div>
+      </div>
+    </div>
+  `;
+
   if (progressTab === "plan") {
     // --- 1. 당일 계획 수립 탭 ---
     let planInputs = "";
@@ -4145,10 +4182,10 @@ function renderProgressTabContent(studentId) {
     }
 
     target.innerHTML = `
-      <div class="card">
+      <div class="card progress-print-card">
         <div class="card-title">📖 ${escapeHTML(st.name)} 학생의 당일 계획 등록 대장 (${state.selectedDate})</div>
         
-        <div style="margin-bottom:20px;">
+        <div style="margin-bottom:12px;">
           ${plansToday.length === 0 ? `
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
               * 학생은 등원하자마자 계획을 작성해 제출하며, 강사나 원장의 [계획확정 승인]을 득한 후 실행합니다. (기본 10줄 제공, 미완료 자동 이월)
@@ -4160,14 +4197,14 @@ function renderProgressTabContent(studentId) {
           
           ${(plansToday.length === 0 || plansToday.some(p => !p.isPlanConfirmed)) ? `
             ${isStudent ? `
-              <div style="display:flex; gap:12px; margin-top:20px;">
+              <div style="display:flex; gap:12px; margin-top:16px;">
                 <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
                   <i data-lucide="plus-circle"></i> [+ 계획 추가]
                 </button>
                 <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
               </div>
             ` : `
-              <div style="display:flex; gap:12px; margin-top:20px;">
+              <div style="display:flex; gap:12px; margin-top:16px;">
                 <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
                   <i data-lucide="plus-circle"></i> [+ 계획 추가]
                 </button>
@@ -4176,6 +4213,8 @@ function renderProgressTabContent(studentId) {
             `}
           ` : ''}
         </div>
+
+        ${notebookLinesHTML}
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
@@ -4344,7 +4383,7 @@ function renderProgressTabContent(studentId) {
       : (savedPlans.length > 0 && savedPlans.some(p => !p.isConfirmed));
 
     target.innerHTML = `
-      <div class="card">
+      <div class="card progress-print-card">
         <div class="card-title">🏆 ${escapeHTML(st.name)} 학생 당일 진도 및 완료 실적 기입 대장</div>
         ${resultRows}
         ${showBulkButton ? `
@@ -4353,6 +4392,8 @@ function renderProgressTabContent(studentId) {
              ${state.currentUser.role !== 'student' ? `<button class="btn btn-emerald" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(true)">✅ 선택 항목 일괄 확정</button>` : ''}
           </div>
         ` : ''}
+
+        ${notebookLinesHTML}
       </div>
     `;
   }
