@@ -27,14 +27,24 @@ let state = {
 // 오프라인 로컬 모크 데이터 로딩 헬퍼
 function loadOfflineMockData() {
   if (window.mockData) {
+    let deletedTcIds = [];
+    try {
+      deletedTcIds = JSON.parse(localStorage.getItem("yuju_deleted_teacher_ids") || "[]");
+    } catch(e) {}
+
+    let deletedNoticeIds = [];
+    try {
+      deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
+    } catch(e) {}
+
     state.students = (window.mockData.students || []).map(r => r.data || r);
-    state.teachers = (window.mockData.teachers || []).map(r => r.data || r);
+    state.teachers = (window.mockData.teachers || []).map(r => r.data || r).filter(t => t && t.id && !deletedTcIds.includes(t.id));
     state.teacherSchedules = (window.mockData.teacherSchedules || []).map(r => r.data || r);
     state.teacherWorkLogs = (window.mockData.teacherWorkLogs || []).map(r => r.data || r);
     state.enrollments = (window.mockData.enrollments || []).map(r => r.data || r);
     state.attendance = (window.mockData.attendance || []).map(r => r.data || r);
     state.dailyPlans = (window.mockData.dailyPlans || []).map(r => r.data || r);
-    state.notices = (window.mockData.notices || []).map(r => r.data || r);
+    state.notices = (window.mockData.notices || []).map(r => r.data || r).filter(n => n && n.id && !deletedNoticeIds.includes(n.id));
     state.consultations = (window.mockData.consultations || []).map(r => r.data || r);
     state.monthlyOperations = {};
     if (window.mockData.monthlyOperations) {
@@ -235,14 +245,32 @@ async function loadAllData() {
       supabaseClient.from("agy_monthly_operations").select("*")
     ]);
     
+    let deletedTcIds = [];
+    try {
+      deletedTcIds = JSON.parse(localStorage.getItem("yuju_deleted_teacher_ids") || "[]");
+    } catch(e) {}
+
+    let deletedNoticeIds = [];
+    try {
+      deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
+    } catch(e) {}
+
     state.students = (resStudents.data || []).map(r => r.data);
-    state.teachers = (resTeachers.data || []).map(r => r.data);
+    let loadedTeachers = (resTeachers.data || []).map(r => r.data).filter(Boolean);
+    if (!loadedTeachers || loadedTeachers.length === 0) {
+      loadedTeachers = (window.mockData.teachers || []).map(r => r.data || r);
+    }
+    state.teachers = loadedTeachers.filter(t => t && t.id && !deletedTcIds.includes(t.id));
     state.teacherSchedules = (resSchedules.data || []).map(r => r.data);
     state.teacherWorkLogs = (resWorklogs.data || []).map(r => r.data);
     state.enrollments = (resEnrollments.data || []).map(r => r.data);
     state.attendance = (resAttendance.data || []).map(r => r.data);
     state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
-    state.notices = (resNotices.data || []).map(r => r.data || r).filter(Boolean);
+    let loadedNotices = (resNotices.data || []).map(r => r.data || r).filter(Boolean);
+    if (!loadedNotices || loadedNotices.length === 0) {
+      loadedNotices = (window.mockData.notices || []).map(r => r.data || r);
+    }
+    state.notices = loadedNotices.filter(n => n && n.id && !deletedNoticeIds.includes(n.id));
     
     // Supabase 데이터 + 로컬스토리지 보관 데이터 병합 (중복 제거)
     const remoteConsultations = (resConsultations.data || []).map(r => r.data || r).filter(Boolean);
@@ -605,7 +633,12 @@ function renderDashboard() {
     <div style="padding: 10px 14px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 8px;">
       <span style="font-weight: 700; color: var(--text-dark); cursor: pointer; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" onclick="showNoticeDetail('${n.id}')" title="${escapeHTML(n.title)}">${escapeHTML(n.title)}</span>
       <span style="font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;">${n.date} · ${escapeHTML(n.author)}</span>
-      <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; flex-shrink: 0;" onclick="showNoticeDetail('${n.id}')">보기</button>
+      <div style="display:flex; gap:4px; flex-shrink: 0;">
+        <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="showNoticeDetail('${n.id}')">보기</button>
+        ${state.currentUser.role === 'director' ? `
+          <button class="btn" style="padding: 3px 8px; font-size: 11px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="event.stopPropagation(); deleteNoticeRecord('${n.id}')">삭제</button>
+        ` : ''}
+      </div>
     </div>
   `).join("");
   
@@ -671,6 +704,7 @@ function renderDashboard() {
 function showNoticeDetail(noticeId) {
   const notice = state.notices.find(n => n.id === noticeId);
   if (!notice) return;
+  const isDirector = state.currentUser && state.currentUser.role === 'director';
   
   openModal(`
     <div class="modal-header">
@@ -683,11 +717,49 @@ function showNoticeDetail(noticeId) {
       </div>
       <p style="white-space: pre-wrap; font-size:14px; color:var(--text-dark);">${escapeHTML(notice.content)}</p>
     </div>
-    <div class="modal-footer">
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+      ${isDirector ? `
+        <button class="btn" style="padding: 6px 12px; font-size:12px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteNoticeRecord('${notice.id}')">🗑️ 공지 삭제</button>
+      ` : '<div></div>'}
       <button class="btn btn-secondary" onclick="closeModal()">닫기</button>
     </div>
   `);
 }
+
+async function deleteNoticeRecord(id) {
+  const notice = state.notices.find(n => n.id === id);
+  const title = notice ? notice.title : '공지사항';
+
+  if (!confirm(`[${title}] 공지사항을 정말로 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  // 1. 메모리 state에서 삭제
+  state.notices = state.notices.filter(n => n && n.id !== id);
+
+  // 2. 삭제된 notice ID localStorage 보관
+  try {
+    let deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
+    if (!deletedNoticeIds.includes(id)) {
+      deletedNoticeIds.push(id);
+      localStorage.setItem("yuju_deleted_notice_ids", JSON.stringify(deletedNoticeIds));
+    }
+  } catch(e) {}
+
+  // 3. Supabase DB에서 삭제
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from("agy_notices").delete().eq("id", id);
+    } catch (e) {
+      console.error("공지사항 DB 삭제 실패:", e);
+    }
+  }
+
+  closeModal();
+  alert("공지사항이 정상적으로 삭제되었습니다.");
+  renderDashboard();
+}
+window.deleteNoticeRecord = deleteNoticeRecord;
 
 function openNewNoticeModal() {
   openModal(`
@@ -1915,33 +1987,65 @@ function toggleTeacherTab(tab) {
 // 1. 강사 인적사항 등록
 function renderTeacherReg() {
   const target = document.getElementById("teacherTabContent");
+  const isDirector = state.currentUser && state.currentUser.role === 'director';
   
   let rows = state.teachers.map(t => `
     <tr>
+      ${isDirector ? `
+        <td style="text-align:center;">
+          <input type="checkbox" class="tc-checkbox" value="${t.id}" style="cursor:pointer;">
+        </td>
+      ` : ''}
       <td><strong>${escapeHTML(t.name)}</strong></td>
       <td>${escapeHTML(t.gender)}</td>
       <td>${escapeHTML(t.academics)}</td>
       <td>${escapeHTML(t.phone)}</td>
       <td>${t.birthday}</td>
+      ${isDirector ? `
+        <td style="text-align:center;">
+          <button class="btn" style="padding: 4px 8px; font-size:11px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="deleteTeacherRecord('${t.id}')">
+            🗑️ 삭제
+          </button>
+        </td>
+      ` : ''}
     </tr>
   `).join("");
   
+  const totalCols = isDirector ? 7 : 5;
   if (rows === "") {
-    rows = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">등록된 강사가 없습니다.</td></tr>`;
+    rows = `<tr><td colspan="${totalCols}" style="text-align:center; color:var(--text-muted); padding:20px;">등록된 강사가 없습니다.</td></tr>`;
   }
 
   target.innerHTML = `
     <div class="card">
-      <div class="card-title">강사 인적 사항 리스트</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:0;">강사 인적 사항 리스트 (${state.teachers.length}명)</div>
+        ${isDirector ? `
+          <div style="display:flex; gap:8px;">
+            <button class="btn" style="padding:6px 12px; font-size:12px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteSelectedTeacherRecords()">
+              🗑️ 선택 삭제
+            </button>
+            <button class="btn" style="padding:6px 12px; font-size:12px; background:#991b1b; color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteAllTeacherRecords()">
+              🚨 전체 삭제
+            </button>
+          </div>
+        ` : ''}
+      </div>
       <div class="table-responsive">
         <table class="yuju-table">
           <thead>
             <tr>
+              ${isDirector ? `
+                <th style="width:40px; text-align:center;">
+                  <input type="checkbox" id="selectAllTc" onclick="toggleAllTcCheckboxes(this)" style="cursor:pointer;">
+                </th>
+              ` : ''}
               <th>이름</th>
               <th>성별</th>
               <th>학력사항</th>
               <th>전화번호</th>
               <th>생년월일</th>
+              ${isDirector ? `<th style="text-align:center; width:80px;">관리</th>` : ''}
             </tr>
           </thead>
           <tbody>
@@ -1952,6 +2056,143 @@ function renderTeacherReg() {
     </div>
   `;
 }
+
+function toggleAllTcCheckboxes(mainCb) {
+  const checkboxes = document.querySelectorAll(".tc-checkbox");
+  checkboxes.forEach(cb => cb.checked = mainCb.checked);
+}
+window.toggleAllTcCheckboxes = toggleAllTcCheckboxes;
+
+async function deleteTeacherRecord(id) {
+  const teacher = state.teachers.find(t => t.id === id);
+  if (!teacher) return;
+
+  if (!confirm(`[${teacher.name}] 강사 정보를 정말로 삭제하시겠습니까?\n삭제 시 로그인 계정도 함께 제거됩니다.`)) {
+    return;
+  }
+
+  // 1. 삭제된 ID localStorage 보관
+  try {
+    let deletedTcIds = JSON.parse(localStorage.getItem("yuju_deleted_teacher_ids") || "[]");
+    if (!deletedTcIds.includes(id)) {
+      deletedTcIds.push(id);
+      localStorage.setItem("yuju_deleted_teacher_ids", JSON.stringify(deletedTcIds));
+    }
+  } catch(e) {}
+
+  // 2. 메모리 state에서 삭제
+  state.teachers = state.teachers.filter(t => t && t.id !== id);
+  state.users = state.users.filter(u => u && u.username !== teacher.name && u.id !== id);
+
+  // 3. Supabase DB에서 삭제 (agy_teachers 및 agy_users)
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from("agy_teachers").delete().eq("id", id);
+      await supabaseClient.from("agy_users").delete().eq("username", teacher.name);
+    } catch (e) {
+      console.error("강사 DB 삭제 실패:", e);
+    }
+  }
+
+  alert(`[${teacher.name}] 강사 정보가 삭제되었습니다.`);
+  renderTeacherReg();
+}
+window.deleteTeacherRecord = deleteTeacherRecord;
+
+async function deleteSelectedTeacherRecords() {
+  const checkboxes = document.querySelectorAll(".tc-checkbox:checked");
+  const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+
+  if (selectedIds.length === 0) {
+    alert("삭제할 강사를 하나 이상 체크해 주세요.");
+    return;
+  }
+
+  const selectedTeachers = state.teachers.filter(t => selectedIds.includes(t.id));
+  const namesStr = selectedTeachers.map(t => t.name).join(", ");
+
+  if (!confirm(`선택하신 ${selectedIds.length}명의 강사 [${namesStr}] 인적사항을 정말로 삭제하시겠습니까?\n삭제 시 해당 로그인 계정도 함께 제거됩니다.`)) {
+    return;
+  }
+
+  try {
+    const teacherNames = selectedTeachers.map(t => t.name);
+
+    // 1. 삭제된 ID localStorage 보관
+    try {
+      let deletedTcIds = JSON.parse(localStorage.getItem("yuju_deleted_teacher_ids") || "[]");
+      selectedIds.forEach(id => {
+        if (!deletedTcIds.includes(id)) deletedTcIds.push(id);
+      });
+      localStorage.setItem("yuju_deleted_teacher_ids", JSON.stringify(deletedTcIds));
+    } catch(e) {}
+
+    // 2. 메모리 state에서 삭제
+    state.teachers = state.teachers.filter(t => t && !selectedIds.includes(t.id));
+    state.users = state.users.filter(u => u && !teacherNames.includes(u.username) && !selectedIds.includes(u.id));
+
+    // 3. Supabase DB에서 삭제
+    if (supabaseClient) {
+      for (const id of selectedIds) {
+        await supabaseClient.from("agy_teachers").delete().eq("id", id);
+      }
+      for (const name of teacherNames) {
+        await supabaseClient.from("agy_users").delete().eq("username", name);
+      }
+    }
+
+    alert(`${selectedIds.length}명의 강사 정보가 삭제되었습니다.`);
+    renderTeacherReg();
+  } catch (err) {
+    console.error("선택 강사 삭제 실패:", err);
+  }
+}
+window.deleteSelectedTeacherRecords = deleteSelectedTeacherRecords;
+
+async function deleteAllTeacherRecords() {
+  if (state.teachers.length === 0) {
+    alert("등록된 강사가 없습니다.");
+    return;
+  }
+
+  if (!confirm(`등록된 전체 강사(총 ${state.teachers.length}명)의 인적사항을 정말로 전체 삭제하시겠습니까?\n모든 강사 계정도 함께 삭제되며 이 작업은 복구할 수 없습니다.`)) {
+    return;
+  }
+
+  try {
+    const teacherIds = state.teachers.map(t => t.id);
+    const teacherNames = state.teachers.map(t => t.name);
+
+    // 1. 삭제된 ID localStorage 보관
+    try {
+      let deletedTcIds = JSON.parse(localStorage.getItem("yuju_deleted_teacher_ids") || "[]");
+      teacherIds.forEach(id => {
+        if (!deletedTcIds.includes(id)) deletedTcIds.push(id);
+      });
+      localStorage.setItem("yuju_deleted_teacher_ids", JSON.stringify(deletedTcIds));
+    } catch(e) {}
+
+    // 2. 메모리 state에서 삭제
+    state.teachers = [];
+    state.users = state.users.filter(u => u && !teacherNames.includes(u.username) && !teacherIds.includes(u.id));
+
+    // 3. Supabase DB에서 삭제
+    if (supabaseClient) {
+      for (const id of teacherIds) {
+        await supabaseClient.from("agy_teachers").delete().eq("id", id);
+      }
+      for (const name of teacherNames) {
+        await supabaseClient.from("agy_users").delete().eq("username", name);
+      }
+    }
+
+    alert(`전체 강사 정보가 성공적으로 삭제되었습니다.`);
+    renderTeacherReg();
+  } catch (err) {
+    console.error("전체 강사 삭제 실패:", err);
+  }
+}
+window.deleteAllTeacherRecords = deleteAllTeacherRecords;
 
 function openNewTeacherModal() {
   openModal(`
@@ -2105,16 +2346,51 @@ function renderTeacherPlan() {
     }
   }
 
+  // 해당 월(opsYearMonth)의 등록된 근무 일정 추출 및 정렬
+  const monthSchedules = state.teacherSchedules
+    .filter(sch => sch.date && sch.date.startsWith(opsYearMonth))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  let monthSchedulesRows = monthSchedules.map(sch => {
+    const tc = state.teachers.find(t => t.id === sch.teacherId);
+    const tcName = tc ? tc.name : "알 수 없음";
+    return `
+      <tr>
+        <td style="text-align:center;">
+          <input type="checkbox" class="sch-checkbox" value="${sch.id}" style="cursor:pointer;">
+        </td>
+        <td><strong>${sch.date}</strong></td>
+        <td>👩‍🏫 ${escapeHTML(tcName)}</td>
+        <td>⏰ ${sch.startTime} ~ ${sch.endTime}</td>
+        <td style="text-align:center;">
+          <button class="btn btn-danger" style="padding:3px 8px; font-size:11px; border-radius:3px;" onclick="deleteTeacherSchedule('${sch.id}')">삭제</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  if (monthSchedulesRows === "") {
+    monthSchedulesRows = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">등록된 강사 근무 계획이 없습니다.</td></tr>`;
+  }
+
   target.innerHTML = `
     <!-- 강사 근무 월간 캘린더 섹션 -->
     <div class="card" style="margin-top:0;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div class="card-title" style="margin-bottom:0;">🗓 강사 근무 월간 캘린더 (해당 일자를 클릭하여 근무를 등록하세요)</div>
-        <select id="teacherMonthSelector" onchange="changeOpsMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700;">
-          <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
-          <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
-          <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
-        </select>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <select id="teacherMonthSelector" onchange="changeOpsMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700;">
+            <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
+            <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
+            <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
+          </select>
+          <button class="btn" style="padding:7px 12px; font-size:12px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteSelectedTeacherSchedules()">
+            🗑️ 선택 삭제
+          </button>
+          <button class="btn" style="padding:7px 12px; font-size:12px; background:#991b1b; color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteAllTeacherSchedulesMonth()">
+            🚨 전체 삭제
+          </button>
+        </div>
       </div>
       <div style="display:flex; gap:16px; margin-bottom:12px; font-size:12px; align-items:center;">
         <span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:12px; height:12px; background:#d1fae5; border:1px solid #6ee7b7; border-radius:2px; display:inline-block;"></span> 운영일 (근무 등록 가능)</span>
@@ -2130,6 +2406,40 @@ function renderTeacherPlan() {
         <div class="calendar-day-label">금</div>
         <div class="calendar-day-label">토</div>
         ${calendarCells}
+      </div>
+    </div>
+
+    <!-- 근무 계획 상세 관리 및 선택/전체 삭제 리스트 -->
+    <div class="card" style="margin-top:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:0;">📋 ${year}년 ${month}월 강사 근무 계획 상세 리스트 (${monthSchedules.length}건)</div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" style="padding:6px 12px; font-size:12px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteSelectedTeacherSchedules()">
+            🗑️ 선택 삭제
+          </button>
+          <button class="btn" style="padding:6px 12px; font-size:12px; background:#991b1b; color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteAllTeacherSchedulesMonth()">
+            🚨 전체 삭제
+          </button>
+        </div>
+      </div>
+      
+      <div class="table-responsive">
+        <table class="yuju-table">
+          <thead>
+            <tr>
+              <th style="width:40px; text-align:center;">
+                <input type="checkbox" id="selectAllSch" onclick="toggleAllSchCheckboxes(this)" style="cursor:pointer;">
+              </th>
+              <th>근무 날짜</th>
+              <th>강사명</th>
+              <th>근무 예정 시간</th>
+              <th style="text-align:center; width:80px;">관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${monthSchedulesRows}
+          </tbody>
+        </table>
       </div>
     </div>
   `;
@@ -2219,6 +2529,80 @@ async function deleteTeacherSchedule(id) {
     }
   }
 }
+
+function toggleAllSchCheckboxes(mainCb) {
+  const checkboxes = document.querySelectorAll(".sch-checkbox");
+  checkboxes.forEach(cb => cb.checked = mainCb.checked);
+}
+window.toggleAllSchCheckboxes = toggleAllSchCheckboxes;
+
+async function deleteSelectedTeacherSchedules() {
+  const checkboxes = document.querySelectorAll(".sch-checkbox:checked");
+  const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+
+  if (selectedIds.length === 0) {
+    alert("삭제할 근무 계획을 하나 이상 체크해 주세요.");
+    return;
+  }
+
+  if (!confirm(`선택하신 ${selectedIds.length}개의 근무 계획을 정말로 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  try {
+    // 1. 메모리 state에서 삭제
+    state.teacherSchedules = state.teacherSchedules.filter(sch => !selectedIds.includes(sch.id));
+
+    // 2. Supabase DB에서 삭제
+    if (supabaseClient) {
+      for (const id of selectedIds) {
+        await supabaseClient.from("agy_teacher_schedules").delete().eq("id", id);
+      }
+    }
+
+    alert(`${selectedIds.length}개의 근무 계획이 삭제되었습니다.`);
+    await loadAllData();
+    renderTeacherPlan();
+  } catch (err) {
+    console.error("근무 계획 선택 삭제 실패:", err);
+  }
+}
+window.deleteSelectedTeacherSchedules = deleteSelectedTeacherSchedules;
+
+async function deleteAllTeacherSchedulesMonth() {
+  const currentMonth = opsYearMonth; // e.g. '2026-08'
+  const monthSchedules = state.teacherSchedules.filter(sch => sch.date && sch.date.startsWith(currentMonth));
+
+  if (monthSchedules.length === 0) {
+    alert(`[${currentMonth}]월에 등록된 근무 계획이 없습니다.`);
+    return;
+  }
+
+  if (!confirm(`[${currentMonth}]월의 모든 강사 근무 계획(총 ${monthSchedules.length}건)을 정말로 전체 삭제하시겠습니까?\n이 작업은 복구할 수 없습니다.`)) {
+    return;
+  }
+
+  try {
+    const deleteIds = monthSchedules.map(sch => sch.id);
+
+    // 1. 메모리 state에서 삭제
+    state.teacherSchedules = state.teacherSchedules.filter(sch => !deleteIds.includes(sch.id));
+
+    // 2. Supabase DB에서 삭제
+    if (supabaseClient) {
+      for (const id of deleteIds) {
+        await supabaseClient.from("agy_teacher_schedules").delete().eq("id", id);
+      }
+    }
+
+    alert(`[${currentMonth}]월의 근무 계획 ${deleteIds.length}건이 모두 전체 삭제되었습니다.`);
+    await loadAllData();
+    renderTeacherPlan();
+  } catch (err) {
+    console.error("근무 계획 전체 삭제 실패:", err);
+  }
+}
+window.deleteAllTeacherSchedulesMonth = deleteAllTeacherSchedulesMonth;
 
 // 3. 근무 일지 작성 및 원장 확정 (월간 총 시간 집계 콤보)
 let teacherStatsStartDate = "2026-07-01"; // 기본 통계 조회 시작일
@@ -4406,9 +4790,12 @@ function renderConsultations() {
             ${cs.memo ? `<div style="background:var(--bg-app); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-color);"><strong>[문의/참고사항]</strong><br>${escapeHTML(cs.memo).replace(/\n/g, '<br>')}</div>` : ''}
           </div>
           
-          <div style="display:flex; justify-content:flex-end;">
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
             <button class="btn btn-secondary" style="padding: 6px 12px; font-size:12px;" onclick="handleConsultStatusChange('${cs.id}')">
               ${isCompleted ? '대기중으로 변경' : '상담완료 처리'}
+            </button>
+            <button class="btn" style="padding: 6px 12px; font-size:12px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="deleteConsultationRecord('${cs.id}')">
+              🗑️ 삭제
             </button>
           </div>
         </div>
@@ -4534,6 +4921,39 @@ async function handleConsultStatusChange(id) {
   
   renderConsultations();
 }
+
+async function deleteConsultationRecord(id) {
+  const cs = state.consultations.find(c => c.id === id);
+  const csName = cs ? (cs.name || cs.studentName || '신청자') : '';
+  
+  if (!confirm(`[${csName}] 학생의 상담 신청 내역을 정말로 삭제하시겠습니까?`)) {
+    return;
+  }
+  
+  // 1. 메모리 state에서 삭제
+  state.consultations = state.consultations.filter(c => c && c.id !== id);
+  
+  // 2. localStorage에서 삭제
+  try {
+    let localList = JSON.parse(localStorage.getItem("yuju_local_consultations") || "[]");
+    localList = localList.filter(c => c && c.id !== id);
+    localStorage.setItem("yuju_local_consultations", JSON.stringify(localList));
+  } catch (e) {
+    console.warn("localStorage consultation delete failed:", e);
+  }
+  
+  // 3. Supabase DB에서 삭제
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from("agy_consultations").delete().eq("id", id);
+    } catch (e) {
+      console.error("상담 신청 DB 삭제 실패:", e);
+    }
+  }
+  
+  renderConsultations();
+}
+window.deleteConsultationRecord = deleteConsultationRecord;
 
 // 밍크고래 계획 모드 시작 헬퍼
 function startDailyPlanMode(studentId) {
