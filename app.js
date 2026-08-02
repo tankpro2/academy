@@ -2657,13 +2657,13 @@ function renderTeacherLogs() {
   
   filteredLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
   
+  const isDirectorRole = state.currentUser.role === 'director';
   let logRowsHTML = filteredLogs.map(log => {
     const tc = state.teachers.find(t => t.id === log.teacherId);
     if (!tc) return "";
     
-    const isDirector = state.currentUser.role === 'director';
     const isOwner = state.currentUser.ref_id === log.teacherId;
-    const editable = !log.isConfirmed && (isOwner || isDirector);
+    const editable = !log.isConfirmed && (isOwner || isDirectorRole);
     
     const workMin = calculateMinutes(log.actualStartTime, log.actualEndTime);
     const restMin = Number(log.breakMinutes || 0);
@@ -2671,6 +2671,11 @@ function renderTeacherLogs() {
     
     return `
       <tr>
+        ${isDirectorRole ? `
+          <td style="text-align:center;">
+            <input type="checkbox" class="worklog-checkbox" value="${log.id}" style="cursor:pointer;">
+          </td>
+        ` : ''}
         <td><strong>${escapeHTML(tc.name)}</strong></td>
         <td>${log.date}</td>
         <td>계획: ${log.planStartTime}~${log.planEndTime}</td>
@@ -2689,16 +2694,24 @@ function renderTeacherLogs() {
             ? `<span class="badge badge-emerald">확정 완료</span>` 
             : `
               ${isOwner ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="saveTeacherLog('${log.id}', false)">저장</button>` : ''}
-              ${isDirector ? `<button class="btn btn-emerald" style="padding:4px 8px; font-size:11px;" onclick="saveTeacherLog('${log.id}', true)">확정결재</button>` : ''}
+              ${isDirectorRole ? `<button class="btn btn-emerald" style="padding:4px 8px; font-size:11px;" onclick="saveTeacherLog('${log.id}', true)">확정결재</button>` : ''}
             `
           }
         </td>
+        ${isDirectorRole ? `
+          <td style="text-align:center;">
+            <button class="btn" style="padding: 4px 8px; font-size:11px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="deleteTeacherWorklog('${log.id}')">
+              🗑️ 삭제
+            </button>
+          </td>
+        ` : ''}
       </tr>
     `;
   }).join("");
 
+  const totalCols = isDirectorRole ? 10 : 8;
   if (logRowsHTML === "") {
-    logRowsHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:20px;">선택하신 기간 내 청구/결재된 근무 일지가 없습니다.</td></tr>`;
+    logRowsHTML = `<tr><td colspan="${totalCols}" style="text-align:center; color:var(--text-muted); padding:20px;">선택하신 기간 내 청구/결재된 근무 일지가 없습니다.</td></tr>`;
   }
 
   // (3) 일지 작성 기능 바 (자신이 강사인 경우에만 출근일지 작성 패널 활성화)
@@ -2767,12 +2780,24 @@ function renderTeacherLogs() {
     ${addLogFormHTML}
     
     <!-- 근무일지 목록 & 확정 액션 -->
-    <h3 style="font-weight:800; font-size:16px; margin:30px 0 16px;">📋 강사 실제 출퇴근 제출부 및 확정 결재 (${periodLabel})</h3>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin:30px 0 16px; flex-wrap:wrap; gap:12px;">
+      <h3 style="font-weight:800; font-size:16px; margin:0;">📋 강사 실제 출퇴근 제출부 및 확정 결재 (${periodLabel})</h3>
+      ${isDirectorRole ? `
+        <button class="btn" style="padding:6px 12px; font-size:12px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteSelectedTeacherWorklogs()">
+          🗑️ 선택 삭제
+        </button>
+      ` : ''}
+    </div>
     <div class="card">
       <div class="table-responsive">
         <table class="yuju-table">
           <thead>
             <tr>
+              ${isDirectorRole ? `
+                <th style="width:40px; text-align:center;">
+                  <input type="checkbox" id="selectAllWorklogs" onclick="toggleAllWorklogCheckboxes(this)" style="cursor:pointer;">
+                </th>
+              ` : ''}
               <th>강사명</th>
               <th>일자</th>
               <th>계획</th>
@@ -2781,6 +2806,7 @@ function renderTeacherLogs() {
               <th>휴게 시간</th>
               <th>실수령 시간</th>
               <th>결재 상태</th>
+              ${isDirectorRole ? `<th style="text-align:center; width:80px;">관리</th>` : ''}
             </tr>
           </thead>
           <tbody>
@@ -2824,6 +2850,71 @@ function setTeacherStatsPreset(preset) {
 
 window.changeTeacherStatsPeriod = changeTeacherStatsPeriod;
 window.setTeacherStatsPreset = setTeacherStatsPreset;
+
+function toggleAllWorklogCheckboxes(mainCb) {
+  const checkboxes = document.querySelectorAll(".worklog-checkbox");
+  checkboxes.forEach(cb => cb.checked = mainCb.checked);
+}
+window.toggleAllWorklogCheckboxes = toggleAllWorklogCheckboxes;
+
+async function deleteTeacherWorklog(id) {
+  const log = state.teacherWorkLogs.find(l => l.id === id);
+  if (!log) return;
+  const tc = state.teachers.find(t => t.id === log.teacherId);
+  const tcName = tc ? tc.name : "강사";
+
+  if (!confirm(`[${log.date}] ${tcName} 강사의 출퇴근 결재 내역을 정말로 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  try {
+    // 1. 메모리 state에서 삭제
+    state.teacherWorkLogs = state.teacherWorkLogs.filter(l => l.id !== id);
+
+    // 2. Supabase DB에서 삭제
+    if (supabaseClient) {
+      await supabaseClient.from("agy_teacher_worklogs").delete().eq("id", id);
+    }
+
+    alert(`[${log.date}] ${tcName} 강사의 근무 내역이 삭제되었습니다.`);
+    renderTeacherLogs();
+  } catch (err) {
+    console.error("근무 일지 삭제 실패:", err);
+  }
+}
+window.deleteTeacherWorklog = deleteTeacherWorklog;
+
+async function deleteSelectedTeacherWorklogs() {
+  const checkboxes = document.querySelectorAll(".worklog-checkbox:checked");
+  const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+
+  if (selectedIds.length === 0) {
+    alert("삭제할 출퇴근 결재 내역을 하나 이상 체크해 주세요.");
+    return;
+  }
+
+  if (!confirm(`선택하신 ${selectedIds.length}개의 출퇴근 결재 내역을 정말로 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  try {
+    // 1. 메모리 state에서 삭제
+    state.teacherWorkLogs = state.teacherWorkLogs.filter(l => !selectedIds.includes(l.id));
+
+    // 2. Supabase DB에서 삭제
+    if (supabaseClient) {
+      for (const id of selectedIds) {
+        await supabaseClient.from("agy_teacher_worklogs").delete().eq("id", id);
+      }
+    }
+
+    alert(`${selectedIds.length}개의 출퇴근 결재 내역이 성공적으로 삭제되었습니다.`);
+    renderTeacherLogs();
+  } catch (err) {
+    console.error("출퇴근 결재 내역 선택 삭제 실패:", err);
+  }
+}
+window.deleteSelectedTeacherWorklogs = deleteSelectedTeacherWorklogs;
 
 
 function changeLogMonth(ym) {
