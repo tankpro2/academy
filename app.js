@@ -5310,6 +5310,20 @@ function closePublicHomepage() {
   document.getElementById("loginPassword").value = "";
 }
 
+function updateConsultMemoPlaceholder() {
+  const fieldEl = document.getElementById("mContactField");
+  const memoEl = document.getElementById("mContactMemo");
+  if (!fieldEl || !memoEl) return;
+  
+  const val = fieldEl.value;
+  if (val.includes("유주코칭국어학원") || val.includes("대치리드인") || val.includes("국어")) {
+    memoEl.placeholder = "레벨테스트 가능한 시간, 요일 서너개 남겨주세요. 레벨테스트방법은 블로그바로가기 클릭해서 공지사항 읽어주세요.(현재 초4이상만 가능)";
+  } else {
+    memoEl.placeholder = "진로/진학/ 학습유형검사중 선택해서 기재하시고 세부내용 적어주세요.부모동반 컨설팅이 원칙이며 예비중1이상 가능합니다. 원하시는 날짜, 시간도 적어주세요.";
+  }
+}
+window.updateConsultMemoPlaceholder = updateConsultMemoPlaceholder;
+
 async function handleUnifiedConsultation(event) {
   if (event && event.preventDefault) event.preventDefault();
   const nameEl = document.getElementById("mContactName");
@@ -5321,7 +5335,7 @@ async function handleUnifiedConsultation(event) {
   const name = nameEl ? nameEl.value.trim() : "";
   const phone = phoneEl ? phoneEl.value.trim() : "";
   const grade = gradeEl ? gradeEl.value.trim() : "미입력";
-  const field = fieldEl ? fieldEl.value.trim() : "학원/교습소 통합상담";
+  const field = fieldEl ? fieldEl.value.trim() : "유주코칭국어학원(대치리드인)";
   const memo = memoEl ? memoEl.value.trim() : "";
 
   if (!name || !phone) {
@@ -5402,7 +5416,12 @@ async function handleHomepageContact(event) {
 }
 
 function openConsultationModal(field) {
-  const title = (field === '국어/독서코칭') ? '대치리드인 국어 독서코칭' : '유주코칭 진로진학 학습법연구소';
+  const isKoreanReading = (field === '유주코칭국어학원(대치리드인)' || field === '국어/독서코칭');
+  const title = isKoreanReading ? '유주코칭국어학원(대치리드인)' : '유주코칭 진로진학 학습법 컨설팅';
+  const placeholderText = isKoreanReading
+    ? "레벨테스트 가능한 시간, 요일 서너개 남겨주세요. 레벨테스트방법은 블로그바로가기 클릭해서 공지사항 읽어주세요.(현재 초4이상만 가능)"
+    : "진로/진학/ 학습유형검사중 선택해서 기재하시고 세부내용 적어주세요.부모동반 컨설팅이 원칙이며 예비중1이상 가능합니다. 원하시는 날짜, 시간도 적어주세요.";
+
   const content = document.createElement('div');
   content.innerHTML = `
     <div class="modal-header">
@@ -5421,11 +5440,11 @@ function openConsultationModal(field) {
         </div>
         <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
           <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">학교 및 학년</label>
-          <input type="text" id="modalContactGrade" placeholder="예: 대치초 4학년" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+          <input type="text" id="modalContactGrade" placeholder="예: 대치초 4학년 / 단대부고 1학년" required style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
         </div>
         <div class="form-group" style="margin-bottom: 0; display:flex; flex-direction:column; gap:4px;">
           <label style="font-size: 13px; font-weight: 600; text-align:left; color:var(--text-dark);">문의 및 참고사항</label>
-          <textarea id="modalContactMemo" placeholder="원장님께 전달할 특별한 내용(예: 독서 수준, 학습 성향 등)을 적어주세요." style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 80px; resize: none;"></textarea>
+          <textarea id="modalContactMemo" placeholder="${placeholderText}" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 90px; resize: none;"></textarea>
         </div>
         <button type="submit" id="consultSubmitBtn" class="btn btn-emerald" style="width: 100%; padding: 12px; font-weight: 600; border:none; border-radius:var(--radius-sm); cursor:pointer; background-color: var(--primary-color); color:white; margin-top:10px;">상담 신청 완료하기</button>
       </form>
@@ -5473,11 +5492,6 @@ function getHomepageHTML(isPublic) {
           <p style="color:rgba(255,255,255,0.9); font-size:13.5px; margin-top:6px; line-height:1.6; font-weight:500;">
             단순 주입식 교육을 넘어 학생의 문해력을 과학적으로 트레이닝하고,<br>수시 학생부 관리와 심층 상담을 통해 최적의 합격 전략을 설계합니다.
           </p>
-          <div style="display:flex; gap:10px; margin-top:14px;">
-            <button class="btn btn-secondary" onclick="document.getElementById('programs').scrollIntoView({behavior: 'smooth'})" style="background: transparent; color: white; border: 1px solid white; border-radius:30px; padding:9px 18px; font-size:13px;">
-              프로그램 둘러보기
-            </button>
-          </div>
         </div>
         
         <!-- 교육 철학 및 연락처 -->
@@ -5501,7 +5515,7 @@ function getHomepageHTML(isPublic) {
             <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
               <div style="display:flex; align-items:center; gap: 8px;">
                 <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">대치리드인 유주코칭국어학원</h2>
-                <a href="https://blog.naver.com/tankpro11" target="_blank" class="btn btn-secondary" style="padding: 4px 10px; font-size:12px; border-radius:15px; text-decoration:none; display:flex; align-items:center;"><i data-lucide="external-link" style="width:12px; height:12px; margin-right:4px;"></i>블로그 바로가기</a>
+                <a href="https://blog.naver.com/tankpro11" target="_blank" class="btn btn-secondary" style="padding: 4px 10px; font-size:12px; border-radius:15px; text-decoration:none; display:flex; align-items:center;"><i data-lucide="external-link" style="width:12px; height:12px; margin-right:4px;"></i>블로그 바로가기 (클릭)</a>
               </div>
               <span class="badge badge-emerald">독해 및 국어 전문</span>
             </div>
@@ -5530,7 +5544,7 @@ function getHomepageHTML(isPublic) {
             <div class="card-header" style="border-bottom:2px solid var(--bg-app); padding-bottom:10px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
               <div style="display:flex; align-items:center; gap: 8px;">
                 <h2 style="margin:0; font-family:var(--font-title); font-size:18px; color:var(--text-dark);">유주코칭 진로진학 학습법연구소</h2>
-                <a href="https://blog.naver.com/ujucoach" target="_blank" class="btn btn-secondary" style="padding: 4px 10px; font-size:12px; border-radius:15px; text-decoration:none; display:flex; align-items:center;"><i data-lucide="external-link" style="width:12px; height:12px; margin-right:4px;"></i>블로그 바로가기</a>
+                <a href="https://blog.naver.com/ujucoach" target="_blank" class="btn btn-secondary" style="padding: 4px 10px; font-size:12px; border-radius:15px; text-decoration:none; display:flex; align-items:center;"><i data-lucide="external-link" style="width:12px; height:12px; margin-right:4px;"></i>블로그 바로가기 (클릭)</a>
               </div>
               <span class="badge" style="background:var(--accent-gold-light); color:var(--accent-gold);">진로 및 진학 컨설팅</span>
             </div>
