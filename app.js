@@ -518,7 +518,7 @@ function renderSidebarMenu() {
     { key: "teachers", label: "강사 관리", icon: "graduation-cap", roles: ["director"] },
     { key: "enrollments", label: "수강 관리(시간표)", icon: "calendar-days", roles: ["director", "teacher", "assistant"] },
     { key: "studentEnrollments", label: "학생별 시간표", icon: "user-check", roles: ["director", "teacher", "assistant", "student"] },
-    { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant", "student"] },
+    { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant"] },
     { key: "teacherLog", label: "근무 일지 작성", icon: "clock", roles: ["teacher"] },
     { key: "teacherLogApproval", label: "강사 출퇴근 결재", icon: "badge-check", roles: ["director", "assistant"] }
   ];
@@ -3903,109 +3903,62 @@ window.enterStudentPlanMode = enterStudentPlanMode;
 function renderProgress() {
   const container = document.getElementById("mainContent");
   
-  // 로그인 학생인 경우 타겟 자동 고정, 그 외에는 선택된 ID 유지
-  if (state.currentUser.role === 'student') {
-    progressSelectedStudentId = state.currentUser.ref_id;
-  } else if (!progressSelectedStudentId && state.students.length > 0) {
-    progressSelectedStudentId = state.students[0].id;
+  // 로그인 학생인 경우 접근 차단 (원장/강사 전용 메뉴)
+  if (state.currentUser && state.currentUser.role === 'student') {
+    alert("진도 관리는 원장/강사 전용 메뉴입니다.");
+    navigate("studentEnrollments");
+    return;
   }
   
-  if (state.currentUser.role !== 'student' && progressSelectedStudentId && !state.students.some(s => s.id === progressSelectedStudentId)) {
+  if (!progressSelectedStudentId && state.students.length > 0) {
+    progressSelectedStudentId = state.students[0].id;
+  }
+  if (progressSelectedStudentId && !state.students.some(s => s.id === progressSelectedStudentId)) {
     progressSelectedStudentId = state.students.length > 0 ? state.students[0].id : "";
   }
   
   const progressStudentId = progressSelectedStudentId;
+  const selectedStudentObj = state.students.find(s => s.id === progressStudentId);
 
-  // 진도관리 대기화면 조건 확인 (학생 계정일 때만 첫 진입 시 표출)
-  const isStudent = state.currentUser && state.currentUser.role === 'student';
-
-  // 출석(확정) 또는 수강 시간표 등록 여부 체크 (진도관리 접근 제한)
-  const hasAttendance = state.attendance.some(a => a.studentId === progressStudentId && a.date === state.selectedDate);
-  const hasEnrollment = state.enrollments.some(e => e.studentId === progressStudentId && e.date === state.selectedDate);
-  if (isStudent && !hasAttendance && !hasEnrollment) {
-    container.innerHTML = `
-      <div style="padding:60px; text-align:center; margin-top:20px; color:var(--text-muted);">
-        <i data-lucide="alert-circle" style="width:64px; height:64px; color:var(--accent-red); margin-bottom:16px;"></i>
-        <h2 style="color:var(--text-dark); margin-bottom:12px;">수강신청 확인 필요</h2>
-        <p>오늘은(${state.selectedDate})  수강신청한 날이 아닙니다<br>수강 신청 부터 먼저 해주세요. 수강신청후에 확정이 되면 진도관리를 작성해 주세요</p>
-      </div>
-    `;
-    if (window.lucide) window.lucide.createIcons();
-    return;
-  }
-
-  if (isStudent && !state.hasEnteredPlanMode) {
-    const quotes = window.mockData.quotes || [
-      "배움의 깊이를 더하는 상아탑에서의 하루가 미래를 바꿉니다.",
-      "독서는 정신의 음악이다. - 소크라테스"
-    ];
-    const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
-    
-    container.innerHTML = `
-      <div style="
-        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-        background: linear-gradient(rgba(10, 60, 35, 0.55), rgba(8, 45, 25, 0.72)),
-                    url('minke_whale.jpg') no-repeat center center;
-        background-size: cover;
-        display: flex; flex-direction: column;
-        justify-content: center; align-items: center;
-        z-index: 10; color: white; text-align: center; padding: 40px;
-      ">
-        <!-- ① 명언 먼저 -->
-        <div style="max-width: 680px; margin-bottom: 36px; line-height: 2;
-          background: rgba(0,0,0,0.38); padding: 28px 36px;
-          border-radius: 20px; border-top: 4px solid var(--accent-gold);
-          backdrop-filter: blur(8px); box-shadow: 0 8px 28px rgba(0,0,0,0.25);">
-          <p style="font-size: 15px; font-weight: 900; color: var(--accent-gold); margin: 0 0 12px 0; letter-spacing: 1.5px; text-transform: uppercase;">📖 오늘의 동기부여 명언</p>
-          <p style="font-size: clamp(18px, 2.5vw, 24px); font-style: italic; color: #fff; margin: 0; word-break: keep-all; line-height: 1.8; font-weight: 600;">&ldquo;${randomQuote}&rdquo;</p>
-        </div>
-
-        <!-- ② 안내 문구 -->
-        <h2 style="font-size: clamp(22px, 3.5vw, 36px); font-weight: 900; margin-bottom: 14px;
-          text-shadow: 0 3px 10px rgba(0,0,0,0.6); line-height: 1.45; word-break: keep-all; max-width: 720px;">
-          오늘 학원에 도착해서 무엇을 할것인지<br>
-          스스로 계획을 수립해봅니다
-        </h2>
-        <p style="font-size: clamp(15px, 2vw, 20px); color: rgba(255,255,255,0.88); margin-bottom: 40px;
-          text-shadow: 0 1px 4px rgba(0,0,0,0.4); word-break: keep-all;">
-          차분히 생각하시고 준비가 되면 계획수립 버튼을 누르세요
-        </p>
-
-        <!-- ③ 버튼 -->
-        <button class="btn btn-emerald" onclick="enterStudentPlanMode()"
-          style="background: var(--accent-gold); color: #3d1a00; font-weight: 900;
-          padding: 18px 56px; font-size: clamp(16px, 2vw, 20px); border-radius: 50px;
-          box-shadow: 0 8px 28px rgba(197,155,39,0.55); border: none; cursor: pointer;
-          transition: transform 0.15s, box-shadow 0.15s; letter-spacing: 0.5px;"
-          onmouseover="this.style.transform='scale(1.07)'; this.style.boxShadow='0 10px 36px rgba(197,155,39,0.7)';"
-          onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 8px 28px rgba(197,155,39,0.55)';">
-          ✏️ 계획수립 시작
-        </button>
-
-        <!-- ④ 감사 문구 -->
-        <div style="position: absolute; right: 20px; bottom: 16px;
-          font-size: 11px; color: rgba(255,255,255,0.45); font-style: italic; letter-spacing: 0.3px;">
-          도움 주신 beeper9에게 감사드립니다
-        </div>
-      </div>
-    `;
-    if (window.lucide) window.lucide.createIcons();
-    return;
-  }
-  
   // 드롭다운 리스트
   const studentOptions = state.students.map(s => `
     <option value="${s.id}" ${progressStudentId === s.id ? 'selected' : ''}>${escapeHTML(s.name)}</option>
   `).join("");
 
+  const quotes = window.mockData.quotes || [
+    "배움의 깊이를 더하는 상아탑에서의 하루가 미래를 바꿉니다.",
+    "독서는 정신의 음악이다. - 소크라테스"
+  ];
+  const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+
   container.innerHTML = `
     <div class="page-header no-print">
       <div class="page-title">
         <h1>당일 진도 계획 / 실적 관리</h1>
-        <p>등원 시 계획을 등록하고, 퇴실 시 실적을 기입하여 최종 확정 인쇄합니다.</p>
+        <p>선택한 학생의 등원 수강 계획을 등록하고 실적을 기입하여 확정합니다.</p>
       </div>
       <div class="action-bar">
         <button class="btn btn-secondary no-print" onclick="window.print()"><i data-lucide="printer"></i> 진도표 인쇄하기</button>
+      </div>
+    </div>
+
+    <!-- 원장/강사 뷰 밍크고래 학습 코칭 히어로 바 -->
+    <div class="no-print" style="
+      position: relative; overflow: hidden; border-radius: var(--radius-lg); margin-bottom: 20px;
+      background: linear-gradient(135deg, rgba(10, 60, 35, 0.78), rgba(8, 45, 25, 0.88)),
+                  url('minke_whale.jpg') no-repeat center center;
+      background-size: cover; padding: 24px 30px; color: white; box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+    ">
+      <div style="max-width: 720px;">
+        <div style="display: inline-block; background: rgba(197,155,39,0.3); color: var(--accent-gold); border: 1px solid var(--accent-gold); padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 800; margin-bottom: 8px;">
+          🐋 원장/강사 1:1 맞춤 학습 코칭 & 진도 관리
+        </div>
+        <h2 style="font-size: 22px; font-weight: 900; color: #fff; margin-bottom: 6px; word-break: keep-all;">
+          ${selectedStudentObj ? `[${escapeHTML(selectedStudentObj.name)}] 학생` : '학생'} 당일 학습 계획 및 진도 수립
+        </h2>
+        <p style="font-size: 14px; color: rgba(255,255,255,0.9); margin: 0; line-height: 1.5; font-style: italic;">
+          &ldquo;${randomQuote}&rdquo;
+        </p>
       </div>
     </div>
     
@@ -4015,13 +3968,13 @@ function renderProgress() {
     </div>
     
     <div style="display:flex; gap:12px; margin-bottom:20px; align-items:center;" class="no-print">
-      <strong>학생 선택:</strong>
-      <select id="progressStSelector" onchange="changeProgressStudent(this.value)" ${state.currentUser.role === 'student' ? 'disabled' : ''} style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+      <strong style="font-size:14px; font-weight:800;">학생 선택:</strong>
+      <select id="progressStSelector" onchange="changeProgressStudent(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px;">
         ${studentOptions}
       </select>
       
-      <strong>날짜 선택:</strong>
-      <input type="date" id="progressDateSelector" value="${state.selectedDate}" onchange="changeProgressDate(this.value)" style="padding:6px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+      <strong style="font-size:14px; font-weight:800; margin-left:12px;">날짜 선택:</strong>
+      <input type="date" id="progressDateSelector" value="${state.selectedDate}" onchange="changeProgressDate(this.value)" style="padding:6px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px;">
     </div>
     
     <div id="progressTabContent"></div>
@@ -4039,7 +3992,7 @@ function toggleProgressTab(tab) {
 
 function changeProgressStudent(stId) {
   progressSelectedStudentId = stId;
-  renderProgressTabContent(stId);
+  renderProgress();
 }
 
 function changeProgressDate(dateVal) {
@@ -4056,16 +4009,21 @@ function renderProgressTabContent(studentId) {
     return;
   }
 
-  // 출석 또는 수강 시간표 등록 여부 체크 (학생 계정인 경우만 미출석/미등록 시 접근 제한, 원장/강사는 바로 조회 및 승인 가능)
-  const isStudentRole = state.currentUser && state.currentUser.role === 'student';
+  // 출석 또는 수강 시간표 등록 여부 체크 (수강 신청이 안 된 날은 진도관리 작성 접근 차단)
   const hasAttendance = state.attendance.some(a => a.studentId === studentId && a.date === state.selectedDate);
   const hasEnrollment = state.enrollments.some(e => e.studentId === studentId && e.date === state.selectedDate);
-  if (isStudentRole && !hasAttendance && !hasEnrollment) {
+  if (!hasAttendance && !hasEnrollment) {
     target.innerHTML = `
-      <div class="card" style="text-align:center; padding:40px; margin-top:20px; color:var(--text-muted);">
-        <i data-lucide="alert-circle" style="width:48px; height:48px; margin:0 auto 12px; color:var(--accent-red)"></i>
-        <h2 style="font-size:18px; font-weight:700; color:var(--text-dark); margin-bottom:12px;">수강신청 확인 필요</h2>
-        <p>오늘은(${state.selectedDate})  수강신청한 날이 아닙니다<br>수강 신청 부터 먼저 해주세요. 수강신청후에 확정이 되면 진도관리를 작성해 주세요</p>
+      <div class="card" style="text-align:center; padding:48px 24px; margin-top:20px; color:var(--text-muted); background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm);">
+        <div style="width:64px; height:64px; background:#fee2e2; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 16px; color:#ef4444; font-size:28px;">🚫</div>
+        <h2 style="font-size:20px; font-weight:800; color:var(--text-dark); margin-bottom:12px;">수강신청 미등록 날짜입니다</h2>
+        <p style="font-size:14px; color:var(--text-muted); max-width:480px; margin:0 auto 20px; line-height:1.6;">
+          선택하신 날짜(<strong>${state.selectedDate}</strong>)는 [<strong>${escapeHTML(st.name)}</strong>] 학생의 수강신청이 등록되어 있지 않습니다.<br>
+          해당 날짜에 수강신청이 완료되어야 진도 관리를 작성 및 관리할 수 있습니다.
+        </p>
+        <button class="btn btn-emerald" onclick="navigate('enrollments')" style="padding:10px 24px; font-weight:700;">
+          📅 수강 관리(시간표) 메뉴로 이동하여 신청하기
+        </button>
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
@@ -5507,10 +5465,10 @@ function getHomepageHTML(isPublic) {
       <section class="hero-section compact-top" style="background: linear-gradient(135deg, rgba(19, 92, 57, 0.9) 0%, rgba(13, 70, 42, 0.95) 100%), url('ivory_tower.jpg') no-repeat center center; background-size: cover; padding: 28px 32px; border-radius: var(--radius-lg); color: white; display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; align-items: center; box-shadow: var(--shadow-lg);">
         <div>
           <span style="display: inline-block; padding: 3px 10px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 12px; font-weight: 700; color: #fcd34d; margin-bottom: 10px; letter-spacing:0.5px;">
-            ✨ 교육경력 25년 이상 + 유주코칭 프리미엄 명품 학습코칭
+            ✨ 교육경력 25년. 유주코치의 프리미엄 명품 학습코칭
           </span>
           <h1 style="color:white; margin:0 0 10px 0; font-family: var(--font-title); font-size: 23px; font-weight:900; line-height:1.4; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-            뇌과학까지 고려한 우뇌좌뇌 통합형 학습법으로<br>극상위권 도약의 꿈을 이루다
+            독서독해 통합국어코칭 &<br>학습유형에 따른 맞춤 진로진학 컨설팅
           </h1>
           <p style="color:rgba(255,255,255,0.9); font-size:13.5px; margin-top:6px; line-height:1.6; font-weight:500;">
             단순 주입식 교육을 넘어 학생의 문해력을 과학적으로 트레이닝하고,<br>수시 학생부 관리와 심층 상담을 통해 최적의 합격 전략을 설계합니다.
@@ -5524,11 +5482,13 @@ function getHomepageHTML(isPublic) {
         
         <!-- 교육 철학 및 연락처 -->
         <div style="background: rgba(255, 255, 255, 0.08); padding: 16px; border-radius: var(--radius-md); font-size: 12.5px; line-height: 1.7; border-left: 4px solid var(--accent-gold); backdrop-filter: blur(5px);">
-          📞 <strong>상담 대표 번호:</strong> <a href="tel:010-4055-0756" style="color:white; font-weight:700; text-decoration:underline;">010-4055-0756(문자만 가능)</a><br>
-          📍 <strong>국어학원:</strong> 도곡로93길 9, 3층 (피아이 어학원 앞, Seven11 건물)<br>
-          📍 <strong>상담교습소:</strong> 대치동 938-8번지 1층(롯데문화센터옆, 설빙 맞은편 골목)<br>
-          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.1); font-style:italic; font-size:12.5px; color:#e2e8f0;">
-            "글을 제대로 읽지 못하는 학생은 스스로 공부하는 힘을 기를 수 없습니다. 대치리드인에서 기본 문해력을 다지고 1:1 맞춤 대입 컨설팅으로 비전을 그립니다."
+          <div style="font-size: 14.5px; font-weight: 800; color: #fcd34d; margin-bottom: 6px;">
+            📞 <strong>상담 대표 번호:</strong> <a href="tel:010-4055-0756" style="color:#fcd34d; font-size:16px; font-weight:900; text-decoration:underline;">010-4055-0756(문자만 가능)</a>
+          </div>
+          📍 <strong>1관 코칭국어학원:</strong> 도곡로93길 9, 3층 (피아이 어학원 앞, Seven11 건물)<br>
+          📍 <strong>2관 컨설팅:</strong> 대치동 938-8번지 1층(롯데문화센터옆, 설빙 맞은편 골목)<br>
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.15); font-style:italic; font-size:12.5px; color:#e2e8f0; word-break:keep-all; line-height:1.6;">
+            "AI시대는 제대로 읽는 학생이 성공합니다.<br>유주코칭국어학원에서 문해력을 성장시키고 맞춤 컨설팅으로 꿈을 이루세요."
           </div>
         </div>
       </section>
@@ -5546,19 +5506,20 @@ function getHomepageHTML(isPublic) {
               <span class="badge badge-emerald">독해 및 국어 전문</span>
             </div>
             <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
-              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> <strong>특허받은 수준별 맞춤 독서 코칭</strong></li>
-              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 초등 / 중등 독서독해 체계적 훈련</li>
-              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 고등 국어 내신 및 수능 완벽 대비</li>
-              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 글쓰기 트레이닝 (논술 및 수행평가)</li>
-              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 비문학 구조 독해 및 문학 작품 강독</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 숙제 없이 모든 과정 진행 합니다</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 특허받은 수준별 맞춤 독서 코칭</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 초등 / 중등 독서독해 수준별 개인별 맞춤코칭</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 중고등 국어 내신 및 수능 완벽 대비</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 갈래별 글쓰기 트레이닝 (논술 및 수행평가 대비)</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--primary-color); width:15px; height:15px;"></i> 비문학 구조 독해 및 문학 갈래별 특강</li>
             </ul>
           </div>
           <div>
             <button class="btn btn-emerald consult-btn" data-field="국어/독서코칭" style="width: 100%; padding: 10px; font-weight: 700; font-size:13px; border: none; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
-              <i data-lucide="calendar"></i> 대치리드인 상담 신청하기
+              <i data-lucide="calendar"></i> 유주코칭국어학원(대치리드인) 상담 신청하기
             </button>
             <div class="card-footer" style="padding:10px; font-size:12px; background:var(--bg-app); border-radius:var(--radius-sm); color:var(--text-muted); margin-top:10px; line-height:1.5;">
-              특징: 리드인 독서진단검사를 통해 학생의 읽기 능력을 정확하게 진단하고, 개인의 레벨에 맞는 도서 선정 및 전담 강사의 1:1 밀착 피드백을 제공합니다.
+              특징: 리드인 독서진단검사를 통해 학생의 읽기 능력을 정확하게 진단하고, 개인의 레벨에 맞는 도서 선정 및 1:1 밀착 피드백을 제공합니다.
             </div>
           </div>
         </div>
@@ -5574,10 +5535,11 @@ function getHomepageHTML(isPublic) {
               <span class="badge" style="background:var(--accent-gold-light); color:var(--accent-gold);">진로 및 진학 컨설팅</span>
             </div>
             <ul class="program-list" style="list-style:none; padding:0; margin:0 0 12px 0; display:flex; flex-direction:column; gap:6px;">
-              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> <strong>1:1 학습유형 분석 및 진로 설계</strong></li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 학습유형검사 컨설팅(사고기반 브레인하이브학습유형)</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 중고등학생진로검사(나이스기반) 및 진로컨설팅</li>
               <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 개인 성향에 맞춘 자기주도학습 코칭</li>
               <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 중/고등부 생활기록부 및 수행평가 관리</li>
-              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 대입 전략 수시/정시 원서 접수 지도</li>
+              <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 고교학점제 대비 수시전략지도 및 생기부관리컨설팅</li>
               <li style="display:flex; align-items:center; gap:7px; font-size:13px;"><i data-lucide="check-circle-2" style="color:var(--accent-gold); width:15px; height:15px;"></i> 학습 의욕 고취 및 메타인지 강화</li>
             </ul>
           </div>
