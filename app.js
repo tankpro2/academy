@@ -301,19 +301,31 @@ async function loadAllData() {
     state.notices = Array.from(noticeMap.values()).filter(n => n && n.id != null && !deletedNoticeIds.includes(String(n.id)));
     
     // Supabase 데이터 + 로컬스토리지 보관 데이터 병합 (중복 제거)
-    const remoteConsultations = (resConsultations.data || []).map(r => r.data || r).filter(Boolean);
+    const remoteConsultations = (resConsultations.data || []).map(r => {
+      if (!r) return null;
+      if (r.data && typeof r.data === 'object') {
+        return { ...r, ...r.data };
+      }
+      return r;
+    }).filter(Boolean);
+
     let localConsultations = [];
     try {
       localConsultations = JSON.parse(localStorage.getItem("yuju_local_consultations") || "[]");
     } catch (e) {}
 
     const consultMap = new Map();
-    [...localConsultations, ...remoteConsultations].forEach(c => {
-      if (c && c.id) consultMap.set(c.id, c);
+    [...remoteConsultations, ...localConsultations].forEach(c => {
+      if (c && c.id != null) {
+        const strId = String(c.id);
+        if (!consultMap.has(strId)) {
+          consultMap.set(strId, c);
+        }
+      }
     });
     
     state.consultations = Array.from(consultMap.values());
-    if ((!state.consultations || state.consultations.length === 0) && window.mockData && window.mockData.consultations) {
+    if (resConsultations.data === null && (!state.consultations || state.consultations.length === 0) && window.mockData && window.mockData.consultations) {
       state.consultations = window.mockData.consultations;
     }
     
@@ -5342,7 +5354,17 @@ function renderProgressTabContent(studentId) {
 // 11. 상담 신청 내역 관리
 function renderConsultations() {
   const container = document.getElementById("mainContent");
-  if (!state.consultations) state.consultations = [];
+  
+  let localConsultations = [];
+  try {
+    localConsultations = JSON.parse(localStorage.getItem("yuju_local_consultations") || "[]");
+  } catch(e) {}
+
+  const consultMap = new Map();
+  [...(state.consultations || []), ...localConsultations].forEach(c => {
+    if (c && c.id != null) consultMap.set(String(c.id), c);
+  });
+  state.consultations = Array.from(consultMap.values());
   
   // 유효한 객체만 정렬 (최신순)
   const validConsultations = state.consultations.filter(c => c && typeof c === 'object');
@@ -5421,40 +5443,54 @@ async function saveConsultationRecord(consultationData) {
   if (!state.consultations) state.consultations = [];
   
   // 1. 메모리 state 최상단 추가
-  const exists = state.consultations.find(c => c.id === consultationData.id);
-  if (!exists) {
+  const strId = String(consultationData.id);
+  const existsIndex = state.consultations.findIndex(c => c && String(c.id) === strId);
+  if (existsIndex >= 0) {
+    state.consultations[existsIndex] = consultationData;
+  } else {
     state.consultations.unshift(consultationData);
   }
 
   // 2. 브라우저 localStorage에 영구 보관 (페이지 새로고침/네트워크 지연 대비)
   try {
     let localList = JSON.parse(localStorage.getItem("yuju_local_consultations") || "[]");
-    if (!localList.find(c => c.id === consultationData.id)) {
+    const lIdx = localList.findIndex(c => c && String(c.id) === strId);
+    if (lIdx >= 0) {
+      localList[lIdx] = consultationData;
+    } else {
       localList.unshift(consultationData);
-      localStorage.setItem("yuju_local_consultations", JSON.stringify(localList));
     }
+    localStorage.setItem("yuju_local_consultations", JSON.stringify(localList));
   } catch (e) {
     console.warn("localStorage consultation save failed:", e);
   }
 
-  // 3. Supabase DB 비동기 저장
+  // 3. Supabase DB 비동기 저장 (안전한 { id, data } 및 풀 컬럼 듀얼 저장)
   if (supabaseClient) {
     try {
-      await supabaseClient.from("agy_consultations").upsert([
-        {
-          id: consultationData.id,
+      // 1차 시도: { id, data } 기본 스키마 안전 저장 (모든 테이블 공통 규격)
+      const simplePayload = {
+        id: strId,
+        data: consultationData
+      };
+      let res = await supabaseClient.from("agy_consultations").upsert([simplePayload]);
+      if (res && res.error) {
+        console.warn("Supabase simple upsert warning, retrying with full columns:", res.error);
+        const fullPayload = {
+          id: strId,
           data: consultationData,
-          name: consultationData.name || consultationData.studentName,
-          phone: consultationData.phone,
-          field: consultationData.field,
-          grade: consultationData.grade,
-          memo: consultationData.memo,
-          status: consultationData.status,
-          created_at: consultationData.createdAt
-        }
-      ]);
+          name: consultationData.name || consultationData.studentName || "",
+          phone: consultationData.phone || "",
+          field: consultationData.field || consultationData.type || "",
+          grade: consultationData.grade || "",
+          memo: consultationData.memo || "",
+          status: consultationData.status || "대기중",
+          created_at: consultationData.createdAt || new Date().toISOString()
+        };
+        await supabaseClient.from("agy_consultations").upsert([fullPayload]);
+      }
     } catch (e) {
-      console.error("상담 신청 DB 저장 실패:", e);
+      console.error("상담 신청 DB 저장 예외 발생:", e);
     }
   }
 }
