@@ -5478,8 +5478,13 @@ async function renderConsultations() {
 async function saveConsultationRecord(consultationData) {
   if (!state.consultations) state.consultations = [];
   
-  // 1. 메모리 state 최상단 추가
-  const strId = String(consultationData.id);
+  // id를 숫자 timestamp로 통일 (cs-xxx 형태가 DB UUID 타입에서 rejected 될 수 있음)
+  const numericId = consultationData._numericId || Date.now();
+  consultationData._numericId = numericId;
+  const strId = String(numericId);
+  consultationData.id = strId;
+  
+  // 1. 메모리 state에 추가
   const existsIndex = state.consultations.findIndex(c => c && String(c.id) === strId);
   if (existsIndex >= 0) {
     state.consultations[existsIndex] = consultationData;
@@ -5487,7 +5492,7 @@ async function saveConsultationRecord(consultationData) {
     state.consultations.unshift(consultationData);
   }
 
-  // 2. 브라우저 localStorage에 영구 보관 (페이지 새로고침/네트워크 지연 대비)
+  // 2. localStorage 저장
   try {
     let localList = JSON.parse(localStorage.getItem("yuju_local_consultations") || "[]");
     const lIdx = localList.findIndex(c => c && String(c.id) === strId);
@@ -5501,66 +5506,38 @@ async function saveConsultationRecord(consultationData) {
     console.warn("localStorage consultation save failed:", e);
   }
 
-  // 3. Supabase DB 저장 (다중 스키마 호환 시도)
-  if (supabaseClient) {
-    let saved = false;
-    // 시도 1: { id, data } 기본 스키마
-    try {
-      const res1 = await supabaseClient.from("agy_consultations").upsert([{
-        id: strId,
-        data: consultationData
-      }]);
-      if (!res1.error) {
-        saved = true;
-        console.log("상담 DB 저장 성공 (id+data 스키마):", strId);
-      } else {
-        console.warn("상담 DB 저장 1차 실패:", res1.error.message);
-      }
-    } catch (e1) {
-      console.warn("상담 DB 저장 1차 예외:", e1);
+  // 3. Supabase DB 저장
+  if (!supabaseClient) {
+    console.warn("supabaseClient 없음 - 상담 데이터 로컬에만 저장");
+    return;
+  }
+
+  const payload = { id: strId, data: consultationData };
+  console.log("상담 DB 저장 시도:", strId, consultationData.name);
+  
+  // insert 먼저 시도
+  try {
+    const resInsert = await supabaseClient.from("agy_consultations").insert([payload]);
+    if (!resInsert.error) {
+      console.log("상담 DB insert 성공:", strId);
+      return;
     }
-    // 시도 2: 풀 컬럼 스키마
-    if (!saved) {
-      try {
-        const res2 = await supabaseClient.from("agy_consultations").upsert([{
-          id: strId,
-          data: consultationData,
-          name: consultationData.name || consultationData.studentName || "",
-          phone: consultationData.phone || "",
-          field: consultationData.field || consultationData.type || "",
-          grade: consultationData.grade || "",
-          memo: consultationData.memo || "",
-          status: consultationData.status || "대기중",
-          created_at: consultationData.createdAt || new Date().toISOString()
-        }]);
-        if (!res2.error) {
-          saved = true;
-          console.log("상담 DB 저장 성공 (풀컬럼 스키마):", strId);
-        } else {
-          console.error("상담 DB 저장 2차 실패:", res2.error.message);
-        }
-      } catch (e2) {
-        console.error("상담 DB 저장 2차 예외:", e2);
-      }
+    console.warn("insert 실패, upsert 시도:", resInsert.error.message);
+  } catch(e1) {
+    console.warn("insert 예외:", String(e1));
+  }
+
+  // upsert 시도 (이미 존재하는 경우 덮어쓰기)
+  try {
+    const resUpsert = await supabaseClient.from("agy_consultations").upsert([payload]);
+    if (!resUpsert.error) {
+      console.log("상담 DB upsert 성공:", strId);
+      return;
     }
-    // 시도 3: insert (upsert 충돌 시 대비)
-    if (!saved) {
-      try {
-        const res3 = await supabaseClient.from("agy_consultations").insert([{
-          id: strId,
-          data: consultationData
-        }]);
-        if (!res3.error) {
-          console.log("상담 DB 저장 성공 (insert 방식):", strId);
-        } else {
-          console.error("상담 DB 최종 insert도 실패:", res3.error.message);
-        }
-      } catch (e3) {
-        console.error("상담 DB 최종 insert 예외:", e3);
-      }
-    }
-  } else {
-    console.warn("supabaseClient 미초기화 상태 - 상담 데이터가 로컬에만 저장됩니다.");
+    console.error("상담 DB upsert도 실패:", resUpsert.error.message);
+    alert("상담 신청 DB 저장 실패:\n" + resUpsert.error.message + "\n\n원장님께 직접 연락해 주세요.");
+  } catch(e2) {
+    console.error("상담 DB upsert 예외:", String(e2));
   }
 }
 
