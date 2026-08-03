@@ -38,17 +38,29 @@ function loadOfflineMockData() {
 
     let deletedNoticeIds = [];
     try {
-      deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
+      deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]").map(String);
+    } catch(e) {}
+
+    let localNotices = [];
+    try {
+      localNotices = JSON.parse(localStorage.getItem("yuju_local_notices") || "[]");
     } catch(e) {}
 
     state.students = (window.mockData.students || []).map(r => r.data || r);
+    state.students.sort((a, b) => (a.name || "").localeCompare(b.name || "", 'ko'));
     state.teachers = (window.mockData.teachers || []).map(r => r.data || r).filter(t => t && t.id && !deletedTcIds.includes(t.id));
     state.teacherSchedules = (window.mockData.teacherSchedules || []).map(r => r.data || r);
     state.teacherWorkLogs = (window.mockData.teacherWorkLogs || []).map(r => r.data || r);
     state.enrollments = (window.mockData.enrollments || []).map(r => r.data || r);
     state.attendance = (window.mockData.attendance || []).map(r => r.data || r);
     state.dailyPlans = (window.mockData.dailyPlans || []).map(r => r.data || r);
-    state.notices = (window.mockData.notices || []).map(r => r.data || r).filter(n => n && n.id && !deletedNoticeIds.includes(n.id));
+    
+    const mockNotices = (window.mockData.notices || []).map(r => r.data || r);
+    const noticeMap = new Map();
+    [...mockNotices, ...localNotices].forEach(n => {
+      if (n && n.id != null) noticeMap.set(String(n.id), n);
+    });
+    state.notices = Array.from(noticeMap.values()).filter(n => n && n.id != null && !deletedNoticeIds.includes(String(n.id)));
     state.consultations = (window.mockData.consultations || []).map(r => r.data || r);
     state.monthlyOperations = {};
     if (window.mockData.monthlyOperations) {
@@ -256,10 +268,11 @@ async function loadAllData() {
 
     let deletedNoticeIds = [];
     try {
-      deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
+      deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]").map(String);
     } catch(e) {}
 
     state.students = (resStudents.data || []).map(r => r.data);
+    state.students.sort((a, b) => (a.name || "").localeCompare(b.name || "", 'ko'));
     let loadedTeachers = (resTeachers.data || []).map(r => r.data).filter(Boolean);
     if (!loadedTeachers || loadedTeachers.length === 0) {
       loadedTeachers = (window.mockData.teachers || []).map(r => r.data || r);
@@ -274,7 +287,17 @@ async function loadAllData() {
     if (!loadedNotices || loadedNotices.length === 0) {
       loadedNotices = (window.mockData.notices || []).map(r => r.data || r);
     }
-    state.notices = loadedNotices.filter(n => n && n.id && !deletedNoticeIds.includes(n.id));
+
+    let localNotices = [];
+    try {
+      localNotices = JSON.parse(localStorage.getItem("yuju_local_notices") || "[]");
+    } catch (e) {}
+
+    const noticeMap = new Map();
+    [...loadedNotices, ...localNotices].forEach(n => {
+      if (n && n.id != null) noticeMap.set(String(n.id), n);
+    });
+    state.notices = Array.from(noticeMap.values()).filter(n => n && n.id != null && !deletedNoticeIds.includes(String(n.id)));
     
     // Supabase 데이터 + 로컬스토리지 보관 데이터 병합 (중복 제거)
     const remoteConsultations = (resConsultations.data || []).map(r => r.data || r).filter(Boolean);
@@ -949,7 +972,7 @@ function renderDashboard() {
 }
 
 function showNoticeDetail(noticeId) {
-  const notice = state.notices.find(n => n.id === noticeId);
+  const notice = state.notices.find(n => n && String(n.id) === String(noticeId));
   if (!notice) return;
   const isDirector = state.currentUser && state.currentUser.role === 'director';
   
@@ -974,7 +997,8 @@ function showNoticeDetail(noticeId) {
 }
 
 async function deleteNoticeRecord(id) {
-  const notice = state.notices.find(n => n.id === id);
+  const strId = String(id);
+  const notice = state.notices.find(n => n && String(n.id) === strId);
   const title = notice ? notice.title : '공지사항';
 
   if (!confirm(`[${title}] 공지사항을 정말로 삭제하시겠습니까?`)) {
@@ -982,21 +1006,28 @@ async function deleteNoticeRecord(id) {
   }
 
   // 1. 메모리 state에서 삭제
-  state.notices = state.notices.filter(n => n && n.id !== id);
+  state.notices = state.notices.filter(n => n && String(n.id) !== strId);
 
-  // 2. 삭제된 notice ID localStorage 보관
+  // 2. localStorage yuju_local_notices에서 삭제
   try {
-    let deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
-    if (!deletedNoticeIds.includes(id)) {
-      deletedNoticeIds.push(id);
+    let localNotices = JSON.parse(localStorage.getItem("yuju_local_notices") || "[]");
+    localNotices = localNotices.filter(n => n && String(n.id) !== strId);
+    localStorage.setItem("yuju_local_notices", JSON.stringify(localNotices));
+  } catch(e) {}
+
+  // 3. 삭제된 notice ID localStorage (yuju_deleted_notice_ids) 보관
+  try {
+    let deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]").map(String);
+    if (!deletedNoticeIds.includes(strId)) {
+      deletedNoticeIds.push(strId);
       localStorage.setItem("yuju_deleted_notice_ids", JSON.stringify(deletedNoticeIds));
     }
   } catch(e) {}
 
-  // 3. Supabase DB에서 삭제
+  // 4. Supabase DB에서 삭제
   if (supabaseClient) {
     try {
-      await supabaseClient.from("agy_notices").delete().eq("id", id);
+      await supabaseClient.from("agy_notices").delete().eq("id", strId);
     } catch (e) {
       console.error("공지사항 DB 삭제 실패:", e);
     }
@@ -1035,26 +1066,41 @@ async function handleNewNotice(event) {
   const title = document.getElementById("noticeTitle").value.trim();
   const content = document.getElementById("noticeContent").value.trim();
   
+  if (!title || !content) {
+    alert("제목과 내용을 입력해주세요.");
+    return;
+  }
+
   const newNotice = {
     id: `nt-${Date.now()}`,
     title,
     content,
     date: new Date().toISOString().split("T")[0],
-    author: state.currentUser.username
+    author: (state.currentUser && state.currentUser.username) ? state.currentUser.username : "원장"
   };
   
+  // 1. 메모리 state 맨 앞에 추가
+  state.notices.unshift(newNotice);
+
+  // 2. 로컬스토리지 보관 (오프라인/재로딩 지원)
   try {
-    const { error } = await supabaseClient.from("agy_notices").insert([{ id: newNotice.id, data: newNotice }]);
-    if (!error) {
-      state.notices.push(newNotice);
-      closeModal();
-      renderDashboard();
-    } else {
-      alert("공지 등록 실패");
+    let localNotices = JSON.parse(localStorage.getItem("yuju_local_notices") || "[]");
+    localNotices.unshift(newNotice);
+    localStorage.setItem("yuju_local_notices", JSON.stringify(localNotices));
+  } catch (e) {}
+
+  // 3. Supabase DB 저장
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from("agy_notices").insert([{ id: newNotice.id, data: newNotice }]);
+    } catch (err) {
+      console.error("Supabase notice insert error:", err);
     }
-  } catch (err) {
-    console.error(err);
   }
+
+  closeModal();
+  renderDashboard();
+  alert("공지사항이 정상적으로 등록되었습니다.");
 }
 
 // --- ② 운영 관리 뷰 (원장 전용) ---
@@ -1510,7 +1556,7 @@ function renderStudents() {
   const container = document.getElementById("mainContent");
   
   let headerAction = "";
-  if (studentTab === "list" && (state.currentUser.role === 'director' || state.currentUser.role === 'assistant')) {
+  if (studentTab === "list" && (state.currentUser.role === 'director' || state.currentUser.role === 'teacher' || state.currentUser.role === 'assistant')) {
     headerAction = `
       <button class="btn btn-danger" onclick="deleteSelectedStudents()"><i data-lucide="trash-2"></i> 선택 삭제</button>
       <button class="btn btn-emerald" onclick="openNewStudentModal()"><i data-lucide="user-plus"></i> 신규 학생 등록</button>
@@ -1594,10 +1640,12 @@ function renderStudentList() {
   const target = document.getElementById("studentTabContent");
   
   // 학생 조회 권한 제어: 학생/학부모는 자신만 보여야 함
-  let visibleStudents = state.students;
+  let visibleStudents = [...state.students];
   if (state.currentUser.role === 'student') {
-    visibleStudents = state.students.filter(s => s.id === state.currentUser.ref_id);
+    visibleStudents = visibleStudents.filter(s => s.id === state.currentUser.ref_id);
   }
+  // 가나다순 (이름순) 정렬
+  visibleStudents.sort((a, b) => (a.name || "").localeCompare(b.name || "", 'ko'));
 
   let tableRows = visibleStudents.map(s => {
     // 3개월 미만 신규 가입 학생 체크 (Bold 및 Emerald 초록색 표시용)
@@ -1623,7 +1671,7 @@ function renderStudentList() {
         </td>
         <td>
           <div style="display:flex; gap:4px; align-items:center;">
-            ${state.currentUser.role === 'director' || state.currentUser.role === 'assistant' ? `
+            ${state.currentUser.role === 'director' || state.currentUser.role === 'teacher' || state.currentUser.role === 'assistant' ? `
               <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="openEditStudentModal('${s.id}')">수정</button>
             ` : `<span style="font-size:12px; color:var(--text-muted);">조회전용</span>`}
             ${state.currentUser.role === 'director' ? `
@@ -1814,20 +1862,28 @@ async function handleNewStudent(event) {
   
   try {
     // 1. 학생 인적사항 삽입
-    await supabaseClient.from("agy_students").insert([{ id, data: studentData }]);
+    if (supabaseClient) {
+      await supabaseClient.from("agy_students").insert([{ id, data: studentData }]);
+      
+      // 2. 로그인 계정 자동 생성 (비밀번호 1234 디폴트)
+      const userRow = {
+        username: name,
+        password: "1234",
+        role: "student",
+        is_password_changed: false,
+        ref_id: id
+      };
+      await supabaseClient.from("agy_users").insert([userRow]);
+    }
     
-    // 2. 로그인 계정 자동 생성 (비밀번호 1234 디폴트)
-    const userRow = {
-      username: name,
-      password: "1234",
-      role: "student",
-      is_password_changed: false,
-      ref_id: id
-    };
-    await supabaseClient.from("agy_users").insert([userRow]);
-    
+    // 메모리 state 추가 및 가나다순 재정렬
+    state.students.push(studentData);
+    state.students.sort((a, b) => (a.name || "").localeCompare(b.name || "", 'ko'));
+
     alert(`${name} 학생 등록 및 로그인 계정이 생성되었습니다. (초기 비밀번호: 1234)`);
-    await loadAllData();
+    if (supabaseClient) {
+      await loadAllData();
+    }
     closeModal();
     renderStudentList();
   } catch (err) {
@@ -1979,8 +2035,16 @@ function renderStudentAttendance() {
   const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
   const selectedDayName = dayNames[dateObj.getDay()];
   
-  // 학생들의 수강 신청 스케줄
-  const activeSchedules = state.enrollments.filter(e => e.date === state.selectedDate);
+  // 학생들의 수강 신청 스케줄 (학생 이름 가나다순 정렬)
+  const activeSchedules = state.enrollments
+    .filter(e => e.date === state.selectedDate)
+    .sort((a, b) => {
+      const stA = state.students.find(s => s.id === a.studentId);
+      const stB = state.students.find(s => s.id === b.studentId);
+      const nameA = stA ? (stA.name || "") : "";
+      const nameB = stB ? (stB.name || "") : "";
+      return nameA.localeCompare(nameB, 'ko');
+    });
   
   let attendanceRows = activeSchedules.map(sch => {
     const st = state.students.find(s => s.id === sch.studentId);
@@ -4451,14 +4515,26 @@ function handleCalendarDateClick(dateStr, isHoliday) {
   `);
 }
 
-// 학생용: 해당 날짜 수강 삭제 (로컬 + DB)
-async function deleteEnrollmentLocal(id, dateStr) {
+// 수강 신청 일정을 삭제하는 함수 (원장/강사/학생 공용)
+async function deleteEnrollment(id) {
+  if (!confirm("해당 수강 신청 일정을 정말 삭제하시겠습니까?")) return;
   state.enrollments = state.enrollments.filter(e => e.id !== id);
-  try {
-    await supabaseClient.from("agy_enrollments").delete().eq("id", id);
-  } catch(e) { console.warn("DB 삭제 실패, 로컬만 반영", e); }
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from("agy_enrollments").delete().eq("id", id);
+    } catch(e) {
+      console.warn("DB 삭제 실패, 메모리 반영:", e);
+    }
+  }
   closeModal();
+  alert("수강 신청 일정이 정상적으로 삭제되었습니다.");
   renderStudentEnrollments();
+}
+window.deleteEnrollment = deleteEnrollment;
+
+// 학생용 및 구버전 단일 삭제 래퍼 함수
+async function deleteEnrollmentLocal(id, dateStr) {
+  return deleteEnrollment(id);
 }
 window.deleteEnrollmentLocal = deleteEnrollmentLocal;
 

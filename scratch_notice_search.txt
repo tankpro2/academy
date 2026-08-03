@@ -1,0 +1,104 @@
+c:/academy\app.js:23: notices: [],                // 공지사항 목록
+c:/academy\app.js:39: let deletedNoticeIds = [];
+c:/academy\app.js:41: deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
+c:/academy\app.js:51: state.notices = (window.mockData.notices || []).map(r => r.data || r).filter(n => n && n.id && !deletedNoticeIds.includes(n.id));
+c:/academy\app.js:178: // 5. 공지사항 삽입
+c:/academy\app.js:179: const noticeRows = window.mockData.notices.map(n => ({ id: n.id, data: n }));
+c:/academy\app.js:180: await supabaseClient.from("agy_notices").insert(noticeRows);
+c:/academy\app.js:236: resNotices,
+c:/academy\app.js:247: supabaseClient.from("agy_notices").select("*"),
+c:/academy\app.js:257: let deletedNoticeIds = [];
+c:/academy\app.js:259: deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
+c:/academy\app.js:273: let loadedNotices = (resNotices.data || []).map(r => r.data || r).filter(Boolean);
+c:/academy\app.js:274: if (!loadedNotices || loadedNotices.length === 0) {
+c:/academy\app.js:275: loadedNotices = (window.mockData.notices || []).map(r => r.data || r);
+c:/academy\app.js:277: state.notices = loadedNotices.filter(n => n && n.id && !deletedNoticeIds.includes(n.id));
+c:/academy\app.js:874: // 최신 공지사항 5건 선별
+c:/academy\app.js:875: const recentNotices = [...state.notices]
+c:/academy\app.js:879: let noticesHTML = recentNotices.map(n => `
+c:/academy\app.js:881: <span style="font-weight: 700; color: var(--text-dark); cursor: pointer; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" onclick="showNoticeDetail('${n.id}')" title="${escapeHTML(n.title)}">${escapeHTML(n.title)}</span>
+c:/academy\app.js:884: <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="showNoticeDetail('${n.id}')">보기</button>
+c:/academy\app.js:886: <button class="btn" style="padding: 3px 8px; font-size: 11px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); cursor:pointer; font-weight:700;" onclick="event.stopPropagation(); deleteNoticeRecord('${n.id}')">삭제</button>
+c:/academy\app.js:892: if (noticesHTML === "") {
+c:/academy\app.js:893: noticesHTML = `<p style="padding: 20px; text-align: center; color: var(--text-muted);">등록된 공지사항이 없습니다.</p>`;
+c:/academy\app.js:903: ${state.currentUser.role === 'director' ? '<button class="btn btn-emerald" onclick="openNewNoticeModal()"><i data-lucide="plus"></i> 공지사항 등록</button>' : ''}
+c:/academy\app.js:908: <div class="card-title">📢 최신 학원 공지사항</div>
+c:/academy\app.js:910: ${noticesHTML}
+c:/academy\app.js:951: function showNoticeDetail(noticeId) {
+c:/academy\app.js:952: const notice = state.notices.find(n => n.id === noticeId);
+c:/academy\app.js:953: if (!notice) return;
+c:/academy\app.js:958: <h3>${escapeHTML(notice.title)}</h3>
+c:/academy\app.js:963: 작성일자: ${notice.date} | 작성자: ${escapeHTML(notice.author)}
+c:/academy\app.js:965: <p style="white-space: pre-wrap; font-size:14px; color:var(--text-dark);">${escapeHTML(notice.content)}</p>
+c:/academy\app.js:969: <button class="btn" style="padding: 6px 12px; font-size:12px; background:var(--accent-red); color:white; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer;" onclick="deleteNoticeRecord('${notice.id}')">🗑️ 공지 삭제</button>
+c:/academy\app.js:976: async function deleteNoticeRecord(id) {
+c:/academy\app.js:977: const notice = state.notices.find(n => n.id === id);
+c:/academy\app.js:978: const title = notice ? notice.title : '공지사항';
+c:/academy\app.js:980: if (!confirm(`[${title}] 공지사항을 정말로 삭제하시겠습니까?`)) {
+c:/academy\app.js:985: state.notices = state.notices.filter(n => n && n.id !== id);
+c:/academy\app.js:987: // 2. 삭제된 notice ID localStorage 보관
+c:/academy\app.js:989: let deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]");
+c:/academy\app.js:990: if (!deletedNoticeIds.includes(id)) {
+c:/academy\app.js:991: deletedNoticeIds.push(id);
+c:/academy\app.js:992: localStorage.setItem("yuju_deleted_notice_ids", JSON.stringify(deletedNoticeIds));
+c:/academy\app.js:999: await supabaseClient.from("agy_notices").delete().eq("id", id);
+c:/academy\app.js:1001: console.error("공지사항 DB 삭제 실패:", e);
+c:/academy\app.js:1006: alert("공지사항이 정상적으로 삭제되었습니다.");
+c:/academy\app.js:1009: window.deleteNoticeRecord = deleteNoticeRecord;
+c:/academy\app.js:1011: function openNewNoticeModal() {
+c:/academy\app.js:1014: <h3>공지사항 등록</h3>
+c:/academy\app.js:1018: <form id="newNoticeForm" onsubmit="handleNewNotice(event)">
+c:/academy\app.js:1020: <label for="noticeTitle">공지 제목</label>
+c:/academy\app.js:1021: <input type="text" id="noticeTitle" required>
+c:/academy\app.js:1024: <label for="noticeContent">공지 내용</label>
+c:/academy\app.js:1025: <textarea id="noticeContent" style="width:100%; height:160px; border:1px solid var(--border-color); border-radius:var(--radius-md); padding:10px; outline:none; font-family:inherit;" required></textarea>
+c:/academy\app.js:1033: async function handleNewNotice(event) {
+c:/academy\app.js:1035: const title = document.getElementById("noticeTitle").value.trim();
+c:/academy\app.js:1036: const content = document.getElementById("noticeContent").value.trim();
+c:/academy\app.js:1038: const newNotice = {
+c:/academy\app.js:1047: const { error } = await supabaseClient.from("agy_notices").insert([{ id: newNotice.id, data: newNotice }]);
+c:/academy\app.js:1049: state.notices.push(newNotice);
+c:/academy\app.js:1053: alert("공지 등록 실패");
+c:/academy\app.js:6088: memoEl.placeholder = "레벨테스트 가능한 시간, 요일 서너개 남겨주세요. 레벨테스트방법은 블로그바로가기 클릭해서 공지사항 읽어주세요.(현재 초4이상만 가능)";
+c:/academy\app.js:6190: ? "레벨테스트 가능한 시간, 요일 서너개 남겨주세요. 레벨테스트방법은 블로그바로가기 클릭해서 공지사항 읽어주세요.(현재 초4이상만 가능)"
+c:/academy\app_recovered.js:19: notices: [],                // 공지사항 목록
+c:/academy\app_recovered.js:91: // 5. 공지사항 삽입
+c:/academy\app_recovered.js:92: const noticeRows = window.mockData.notices.map(n => ({ id: n.id, data: n }));
+c:/academy\app_recovered.js:93: await supabaseClient.from("agy_notices").insert(noticeRows);
+c:/academy\app_recovered.js:141: resNotices,
+c:/academy\app_recovered.js:151: supabaseClient.from("agy_notices").select("*"),
+c:/academy\app_recovered.js:162: state.notices = (resNotices.data || []).map(r => r.data);
+c:/academy\app_recovered.js:401: // 최신 공지사항 5건 선별
+c:/academy\app_recovered.js:402: const recentNotices = [...state.notices]
+c:/academy\app_recovered.js:406: let noticesHTML = recentNotices.map(n => `
+c:/academy\app_recovered.js:409: <h4 style="font-weight: 700; color: var(--text-dark); cursor: pointer;" onclick="showNoticeDetail('${n.id}')">${escapeHTML(n.title)}</h4>
+c:/academy\app_recovered.js:412: <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="showNoticeDetail('${n.id}')">상세보기</button>
+c:/academy\app_recovered.js:416: if (noticesHTML === "") {
+c:/academy\app_recovered.js:417: noticesHTML = `<p style="padding: 20px; text-align: center; color: var(--text-muted);">등록된 공지사항이 없습니다.</p>`;
+c:/academy\app_recovered.js:427: ${state.currentUser.role === 'director' ? '<button class="btn btn-emerald" onclick="openNewNoticeModal()"><i data-lucide="plus"></i> 공지사항 등록</button>' : ''}
+c:/academy\app_recovered.js:432: <div class="card-title">📢 최신 학원 공지사항</div>
+c:/academy\app_recovered.js:434: ${noticesHTML}
+c:/academy\app_recovered.js:475: function showNoticeDetail(noticeId) {
+c:/academy\app_recovered.js:476: const notice = state.notices.find(n => n.id === noticeId);
+c:/academy\app_recovered.js:477: if (!notice) return;
+c:/academy\app_recovered.js:481: <h3>${escapeHTML(notice.title)}</h3>
+c:/academy\app_recovered.js:486: 작성일자: ${notice.date} | 작성자: ${escapeHTML(notice.author)}
+c:/academy\app_recovered.js:488: <p style="white-space: pre-wrap; font-size:14px; color:var(--text-dark);">${escapeHTML(notice.content)}</p>
+c:/academy\app_recovered.js:496: function openNewNoticeModal() {
+c:/academy\app_recovered.js:499: <h3>공지사항 등록</h3>
+c:/academy\app_recovered.js:503: <form id="newNoticeForm" onsubmit="handleNewNotice(event)">
+c:/academy\app_recovered.js:505: <label for="noticeTitle">공지 제목</label>
+c:/academy\app_recovered.js:506: <input type="text" id="noticeTitle" required>
+c:/academy\app_recovered.js:509: <label for="noticeContent">공지 내용</label>
+c:/academy\app_recovered.js:510: <textarea id="noticeContent" style="width:100%; height:160px; border:1px solid var(--border-color); border-radius:var(--radius-md); padding:10px; outline:none; font-family:inherit;" required></textarea>
+c:/academy\app_recovered.js:518: async function handleNewNotice(event) {
+c:/academy\app_recovered.js:520: const title = document.getElementById("noticeTitle").value.trim();
+c:/academy\app_recovered.js:521: const content = document.getElementById("noticeContent").value.trim();
+c:/academy\app_recovered.js:523: const newNotice = {
+c:/academy\app_recovered.js:532: const { error } = await supabaseClient.from("agy_notices").insert([{ id: newNotice.id, data: newNotice }]);
+c:/academy\app_recovered.js:534: state.notices.push(newNotice);
+c:/academy\app_recovered.js:538: alert("공지 등록 실패");
+c:/academy\mockData.js:122: // 5. 공지사항 데이터 (20건)
+c:/academy\mockData.js:123: notices: [
+c:/academy\mockData.js:125: { id: "nt-2", title: "학원 차량 운행 시간 변경 안내", content: "7월 25일부터 학원 셔틀 차량의 노선 및 운행 시간이 일부 조정되오니, 공지 확인 및 등원 시 착오 없으시길 바랍니다.", date: "2026-07-18", author: "원장" },
+c:/academy\index.html:284: <textarea id="mContactMemo" placeholder="레벨테스트 가능한 시간, 요일 서너개 남겨주세요. 레벨테스트방법은 블로그바로가기 클릭해서 공지사항 읽어주세요.(현재 초4이상만 가능)"></textarea>
