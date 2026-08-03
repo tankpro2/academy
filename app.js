@@ -273,8 +273,8 @@ async function loadAllData() {
 
     state.students = (resStudents.data || []).map(r => r.data);
     state.students.sort((a, b) => (a.name || "").localeCompare(b.name || "", 'ko'));
-    let loadedTeachers = (resTeachers.data || []).map(r => r.data).filter(Boolean);
-    if (!loadedTeachers || loadedTeachers.length === 0) {
+    let loadedTeachers = resTeachers.data ? resTeachers.data.map(r => r.data || r).filter(Boolean) : null;
+    if (loadedTeachers === null) {
       loadedTeachers = (window.mockData.teachers || []).map(r => r.data || r);
     }
     state.teachers = loadedTeachers.filter(t => t && t.id && !deletedTcIds.includes(t.id));
@@ -283,8 +283,9 @@ async function loadAllData() {
     state.enrollments = (resEnrollments.data || []).map(r => r.data);
     state.attendance = (resAttendance.data || []).map(r => r.data);
     state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
-    let loadedNotices = (resNotices.data || []).map(r => r.data || r).filter(Boolean);
-    if (!loadedNotices || loadedNotices.length === 0) {
+
+    let loadedNotices = resNotices.data ? resNotices.data.map(r => r.data || r).filter(Boolean) : null;
+    if (loadedNotices === null) {
       loadedNotices = (window.mockData.notices || []).map(r => r.data || r);
     }
 
