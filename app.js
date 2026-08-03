@@ -2804,10 +2804,11 @@ function openNewScheduleModal(dateStr, opStart, opEnd) {
   `);
 }
 
-// 10분 단위 유효성 검사 강제 설정
-function alignToTenMinutes(input) {
+// 5분 단위 유효성 검사 강제 설정
+function alignToFiveMinutes(input) {
+  if (!input || !input.value) return;
   const [h, m] = input.value.split(":").map(Number);
-  const roundedM = Math.round(m / 10) * 10;
+  const roundedM = Math.round(m / 5) * 5;
   let finalH = h;
   let finalM = roundedM;
   if (roundedM === 60) {
@@ -2816,6 +2817,8 @@ function alignToTenMinutes(input) {
   }
   input.value = `${String(finalH).padStart(2, "0")}:${String(finalM).padStart(2, "0")}`;
 }
+window.alignToFiveMinutes = alignToFiveMinutes;
+window.alignToTenMinutes = alignToFiveMinutes;
 
 async function handleNewSchedule() {
   const teacherId = document.getElementById("schTeacherId").value;
@@ -4020,16 +4023,20 @@ function renderStudentEnrollments() {
         ${cellsHTML}
       </div>
       
-      <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-size:12px; color:var(--text-muted);">
-            💡 날짜를 클릭하면 수강 일정을 등록하거나 삭제할 수 있습니다. (🚫 표시된 날은 학원 휴원일입니다)
-          </span>
-        ${isStudent ? `
+      <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <span style="font-size:12px; color:var(--text-muted);">
+          💡 날짜를 클릭하면 수강 일정을 등록하거나 삭제할 수 있습니다. (🚫 표시된 날은 학원 휴원일입니다)
+        </span>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button onclick="openSelectDeleteEnrollmentsModal()"
+            style="display:flex; align-items:center; gap:6px; padding:7px 14px; background:#fff; border:2px solid var(--accent-gold); color:#92400e; border-radius:8px; font-weight:800; font-size:12px; cursor:pointer;">
+            ☑️ 선택 삭제
+          </button>
           <button onclick="clearMonthEnrollments()"
             style="display:flex; align-items:center; gap:6px; padding:7px 14px; background:#fff; border:2px solid #ef4444; color:#ef4444; border-radius:8px; font-weight:800; font-size:12px; cursor:pointer;">
             🗑 이번달 전체 삭제
           </button>
-        ` : ''}
+        </div>
       </div>
     </div>
   `;
@@ -4045,22 +4052,27 @@ function renderStudentEnrollments() {
   }
 }
 
-// 시간 드롭다운 옵션 생성 헬퍼
+// 시간 드롭다운 옵션 생성 헬퍼 (5분 단위)
 function makeTimeOptions(selectedVal, minTime = "00:00", maxTime = "24:00") {
-  const slots = [
-    "09:00","09:30","10:00","10:30","11:00","11:30",
-    "12:00","12:30","13:00","13:30","14:00","14:30",
-    "15:00","15:30","16:00","16:30","17:00","17:30",
-    "18:00","18:30","19:00","19:30","20:00","20:30",
-    "21:00","21:30","22:00"
-  ];
-  return slots.filter(t => t >= minTime && t <= maxTime).map(t => {
-    const [h, m] = t.split(":").map(Number);
-    const ampm = h < 12 ? "오전" : "오후";
-    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    const label = `${ampm} ${h12}:${m === 0 ? "00" : "30"}`;
-    return `<option value="${t}" ${selectedVal === t ? 'selected' : ''}>${label}</option>`;
-  }).join("");
+  const options = [];
+  const minH = parseInt((minTime || "00:00").split(":")[0], 10) || 0;
+  const maxH = parseInt((maxTime || "24:00").split(":")[0], 10) || 23;
+
+  for (let h = Math.max(0, minH); h <= Math.min(23, maxH); h++) {
+    for (let m = 0; m < 60; m += 5) {
+      const hh = String(h).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      const t = `${hh}:${mm}`;
+      if (t >= minTime && t <= maxTime) {
+        const ampm = h < 12 ? "오전" : "오후";
+        const h12 = h === 0 ? 12 : (h > 12 ? h - 12 : h);
+        const label = `${ampm} ${String(h12).padStart(2, '0')}:${mm} (${t})`;
+        const isSelected = selectedVal === t ? 'selected' : '';
+        options.push(`<option value="${t}" ${isSelected}>${label}</option>`);
+      }
+    }
+  }
+  return options.join("");
 }
 window.makeTimeOptions = makeTimeOptions;
 
@@ -4494,12 +4506,16 @@ function handleCalendarDateClick(dateStr, isHoliday) {
           </div>
           <div style="display:flex; gap:12px;">
             <div class="form-group" style="flex:1;">
-              <label>시작 시간 (10분 단위)</label>
-              <input type="time" id="enrStart" step="600" value="${defaultStart}" onchange="alignToTenMinutes(this)">
+              <label style="font-weight:700; font-size:12px; margin-bottom:6px; display:block;">시작 시간 (5분 단위)</label>
+              <select id="enrStart" style="width:100%; padding:10px; border:2px solid var(--border-color); border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;">
+                ${makeTimeOptions(defaultStart, minTime, maxTime)}
+              </select>
             </div>
             <div class="form-group" style="flex:1;">
-              <label>종료 시간 (10분 단위)</label>
-              <input type="time" id="enrEnd" step="600" value="${defaultEnd}" onchange="alignToTenMinutes(this)">
+              <label style="font-weight:700; font-size:12px; margin-bottom:6px; display:block;">종료 시간 (5분 단위)</label>
+              <select id="enrEnd" style="width:100%; padding:10px; border:2px solid var(--border-color); border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;">
+                ${makeTimeOptions(defaultEnd, minTime, maxTime)}
+              </select>
             </div>
           </div>
           <div style="margin:16px 0; display:flex; align-items:center; gap:8px;">
@@ -4602,29 +4618,120 @@ window.saveStudentEnrollmentLocal = saveStudentEnrollmentLocal;
 
 // 이번 달 전체 수강 일정 삭제
 async function clearMonthEnrollments() {
-  const [year, month] = opsYearMonth.split("-").map(Number);
-  const daysInMonth = new Date(year, month, 0).getDate();
+  const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
+  const stName = targetStudent ? targetStudent.name : '선택 학생';
+
   const toDelete = state.enrollments.filter(e => {
-    return e.studentId === enrollSelectedStudentId && e.date.startsWith(opsYearMonth);
+    return e.studentId === enrollSelectedStudentId && e.date && e.date.startsWith(opsYearMonth);
   });
   if (toDelete.length === 0) {
-    alert("이번 달 등록된 수강 일정이 없습니다.");
+    alert(`${stName} 학생의 ${opsYearMonth.replace("-","년 ")}월에 등록된 수강 일정이 없습니다.`);
     return;
   }
-  if (!confirm(`${opsYearMonth.replace("-","년 ")}월 수강 일정 ${toDelete.length}개를 모두 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+  if (!confirm(`[${stName}] 학생의 ${opsYearMonth.replace("-","년 ")}월 수강 일정 ${toDelete.length}개를 모두 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
 
-  toDelete.forEach(e => {
-    state.enrollments = state.enrollments.filter(x => x.id !== e.id);
-  });
-  try {
-    const dels = toDelete.map(e => supabaseClient.from("agy_enrollments").delete().eq("id", e.id));
-    await Promise.all(dels);
-  } catch(err) { console.warn("DB 삭제 실패, 로컬만 반영", err); }
+  const idsToDelete = toDelete.map(e => e.id);
+  state.enrollments = state.enrollments.filter(x => !idsToDelete.includes(x.id));
+  if (supabaseClient) {
+    try {
+      const dels = idsToDelete.map(id => supabaseClient.from("agy_enrollments").delete().eq("id", id));
+      await Promise.all(dels);
+    } catch(err) { console.warn("DB 삭제 실패, 메모리 반영", err); }
+  }
 
   renderStudentEnrollments();
-  alert(`✅ ${opsYearMonth.replace("-","년 ")}월 수강 일정이 모두 삭제되었습니다.`);
+  alert(`✅ [${stName}] 학생의 ${opsYearMonth.replace("-","년 ")}월 수강 일정 ${toDelete.length}개가 모두 삭제되었습니다.`);
 }
 window.clearMonthEnrollments = clearMonthEnrollments;
+
+// 이번 달 수강 일정 선택 삭제 모달
+function openSelectDeleteEnrollmentsModal() {
+  const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
+  const stName = targetStudent ? targetStudent.name : '학생';
+
+  const monthEnrs = state.enrollments
+    .filter(e => e.studentId === enrollSelectedStudentId && e.date && e.date.startsWith(opsYearMonth))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+
+  if (monthEnrs.length === 0) {
+    alert(`${stName} 학생의 ${opsYearMonth.replace("-","년 ")}월에 등록된 수강 일정이 없습니다.`);
+    return;
+  }
+
+  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+
+  const listHTML = monthEnrs.map(enr => {
+    const d = new Date(enr.date);
+    const dayStr = dayNames[d.getDay()] || "";
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border-color); font-size:13px;">
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; flex:1;">
+          <input type="checkbox" class="enr-select-chk" value="${enr.id}" style="width:18px; height:18px; cursor:pointer; accent-color:var(--primary-color);">
+          <span style="font-weight:700; color:var(--text-dark);">${enr.date} (${dayStr})</span>
+          <span style="font-weight:900; color:#047857; background:#d1fae5; padding:2px 8px; border-radius:6px; font-size:12px;">⏰ ${enr.startTime} ~ ${enr.endTime}</span>
+        </label>
+      </div>
+    `;
+  }).join("");
+
+  openModal(`
+    <div class="modal-header">
+      <h3>☑️ 수강 일정 선택 삭제 (${stName} - ${opsYearMonth.replace("-","년 ")}월)</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="max-height:450px; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:8px; border-bottom:2px solid var(--border-color);">
+        <label style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; cursor:pointer;">
+          <input type="checkbox" onchange="toggleAllEnrSelectCheckboxes(this.checked)" style="width:18px; height:18px; cursor:pointer; accent-color:var(--primary-color);">
+          <span>전체 선택 (${monthEnrs.length}개 항목)</span>
+        </label>
+      </div>
+      <div>
+        ${listHTML}
+      </div>
+      <div style="margin-top:20px; display:flex; gap:10px;">
+        <button class="btn btn-danger" style="flex:2; justify-content:center; padding:12px; font-weight:800;" onclick="deleteSelectedEnrollments()">
+          🗑 선택한 항목 삭제
+        </button>
+        <button class="btn btn-secondary" style="flex:1; justify-content:center;" onclick="closeModal()">취소</button>
+      </div>
+    </div>
+  `);
+}
+window.openSelectDeleteEnrollmentsModal = openSelectDeleteEnrollmentsModal;
+
+function toggleAllEnrSelectCheckboxes(checked) {
+  document.querySelectorAll(".enr-select-chk").forEach(cb => cb.checked = checked);
+}
+window.toggleAllEnrSelectCheckboxes = toggleAllEnrSelectCheckboxes;
+
+async function deleteSelectedEnrollments() {
+  const checkboxes = document.querySelectorAll(".enr-select-chk:checked");
+  if (checkboxes.length === 0) {
+    alert("삭제할 수강 일정을 선택해주세요.");
+    return;
+  }
+  const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
+
+  if (!confirm(`선택한 ${idsToDelete.length}개의 수강 일정을 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  state.enrollments = state.enrollments.filter(e => !idsToDelete.includes(e.id));
+  if (supabaseClient) {
+    try {
+      const deletePromises = idsToDelete.map(id => supabaseClient.from("agy_enrollments").delete().eq("id", id));
+      await Promise.all(deletePromises);
+    } catch(e) {
+      console.warn("DB 삭제 실패, 메모리 반영:", e);
+    }
+  }
+
+  closeModal();
+  alert(`✅ 선택한 ${idsToDelete.length}개의 수강 일정이 삭제되었습니다.`);
+  renderStudentEnrollments();
+}
+window.deleteSelectedEnrollments = deleteSelectedEnrollments;
 
 async function handleSaveEnrollment(dateStr) {
   const startTime = document.getElementById("enrStart").value;
