@@ -1564,6 +1564,24 @@ function renderStudents() {
     `;
   }
 
+  const targetStudents = state.currentUser.role === 'student'
+    ? state.students.filter(s => s.id === state.currentUser.ref_id)
+    : state.students;
+
+  const totalCount = targetStudents.length;
+  let activeCount = 0;
+  let leaveCount = 0;
+  let dischargeCount = 0;
+
+  targetStudents.forEach(s => {
+    const status = getStudentStatus(s);
+    if (status === '휴원') leaveCount++;
+    else if (status === '퇴원') dischargeCount++;
+    else activeCount++;
+  });
+
+  const countSummary = `(전체 ${totalCount}명, 재원 ${activeCount}명, 휴원 ${leaveCount}명, 퇴원 ${dischargeCount}명)`;
+
   container.innerHTML = `
     <div class="page-header">
       <div class="page-title">
@@ -1576,7 +1594,7 @@ function renderStudents() {
     </div>
     
     <div class="tabs-navigation">
-      <button class="tab-btn ${studentTab === 'list' ? 'active' : ''}" onclick="toggleStudentTab('list')">👤 등록 관리</button>
+      <button class="tab-btn ${studentTab === 'list' ? 'active' : ''}" onclick="toggleStudentTab('list')">👤 등록 관리 ${countSummary}</button>
       <button class="tab-btn ${studentTab === 'attendance' ? 'active' : ''}" onclick="toggleStudentTab('attendance')">✅ 출결 관리</button>
     </div>
     
@@ -1649,9 +1667,18 @@ function renderStudentList() {
   visibleStudents.sort((a, b) => (a.name || "").localeCompare(b.name || "", 'ko'));
 
   let tableRows = visibleStudents.map(s => {
-    // 3개월 미만 신규 가입 학생 체크 (Bold 및 Emerald 초록색 표시용)
     const isNew = isStudentNew(s.registeredDate);
     const highlightClass = isNew ? "new-student-highlight" : "";
+
+    const status = getStudentStatus(s);
+    let statusBadge = "";
+    if (status === '휴원') {
+      statusBadge = `<span style="display:inline-block; padding:3px 8px; font-size:11px; font-weight:800; border-radius:99px; background:#fef3c7; color:#b45309; border:1px solid #f59e0b;">🟡 휴원</span>`;
+    } else if (status === '퇴원') {
+      statusBadge = `<span style="display:inline-block; padding:3px 8px; font-size:11px; font-weight:800; border-radius:99px; background:#fee2e2; color:#b91c1c; border:1px solid #ef4444;">🔴 퇴원</span>`;
+    } else {
+      statusBadge = `<span style="display:inline-block; padding:3px 8px; font-size:11px; font-weight:800; border-radius:99px; background:#d1fae5; color:#047857; border:1px solid #10b981;">🟢 재원</span>`;
+    }
     
     return `
       <tr>
@@ -1663,11 +1690,14 @@ function renderStudentList() {
         <td>${s.studentPhone || "-"}</td>
         <td>${s.parentPhone1 || "-"}</td>
         <td>
-          <div style="font-size:11px; line-height:1.3;">
+          <div style="margin-bottom:6px;">
+            ${statusBadge}
+          </div>
+          <div style="font-size:11px; line-height:1.4;">
             <div>등록: ${s.registeredDate || "-"}</div>
-            ${s.leaveDate ? `<div style="color:var(--accent-yellow)">휴원: ${s.leaveDate}</div>` : ''}
-            ${s.reregisteredDate ? `<div style="color:var(--primary-color)">재등록: ${s.reregisteredDate}</div>` : ''}
-            ${s.dischargeDate ? `<div style="color:var(--accent-red)">퇴원: ${s.dischargeDate}</div>` : ''}
+            ${s.leaveDate ? `<div style="color:#b45309; font-weight:700;">휴원: ${s.leaveDate}</div>` : ''}
+            ${s.reregisteredDate ? `<div style="color:#047857; font-weight:700;">재등록: ${s.reregisteredDate}</div>` : ''}
+            ${s.dischargeDate ? `<div style="color:#b91c1c; font-weight:700;">퇴원: ${s.dischargeDate}</div>` : ''}
           </div>
         </td>
         <td>
@@ -1688,9 +1718,23 @@ function renderStudentList() {
     tableRows = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted);">표시할 학생 정보가 없습니다.</td></tr>`;
   }
 
+  const totalCount = visibleStudents.length;
+  let activeCount = 0;
+  let leaveCount = 0;
+  let dischargeCount = 0;
+
+  visibleStudents.forEach(s => {
+    const status = getStudentStatus(s);
+    if (status === '휴원') leaveCount++;
+    else if (status === '퇴원') dischargeCount++;
+    else activeCount++;
+  });
+
+  const countSummary = `(전체 ${totalCount}명, 재원 ${activeCount}명, 휴원 ${leaveCount}명, 퇴원 ${dischargeCount}명)`;
+
   target.innerHTML = `
     <div class="card">
-      <div class="card-title">학원생 인적사항 관리</div>
+      <div class="card-title">학원생 인적사항 관리 <span style="font-size:13px; font-weight:700; color:var(--primary-color); margin-left:6px;">${countSummary}</span></div>
       <div class="table-responsive">
         <table class="yuju-table">
           <thead>
@@ -1714,6 +1758,25 @@ function renderStudentList() {
     </div>
   `;
 }
+
+// 학생 상태 판별 헬퍼 (재원 / 휴원 / 퇴원)
+function getStudentStatus(s) {
+  if (!s) return '재원';
+  const dis = s.dischargeDate || '';
+  const leave = s.leaveDate || '';
+  const rereg = s.reregisteredDate || '';
+
+  if (dis) {
+    if (rereg && rereg > dis) return '재원';
+    return '퇴원';
+  }
+  if (leave) {
+    if (rereg && rereg > leave) return '재원';
+    return '휴원';
+  }
+  return '재원';
+}
+window.getStudentStatus = getStudentStatus;
 
 // 3개월(90일) 미만 학생 판별 헬퍼
 function isStudentNew(regDateStr) {
