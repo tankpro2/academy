@@ -4475,6 +4475,9 @@ function handleCalendarDateClick(dateStr, isHoliday) {
 
 
   // 원장/강사용: 다중 수강 등록 모달 지원
+  const op = state.monthlyOperations[opsYearMonth]?.[dateStr] || { isHoliday: false, start: "13:00", end: "22:00" };
+  const minTime = op.start || "13:00";
+  const maxTime = op.end || "22:00";
   const defaultStart = "13:00";
   const defaultEnd   = "14:30";
   
