@@ -839,10 +839,11 @@ table.yuju-table tr:hover td {
 /* 인쇄용 최적화 */
 /* 당일진도계획/실적관리 출력물 하단 노트 가로줄 피드백 영역 */
 .progress-print-notebook {
-  margin-top: 28px;
+  margin-top: 24px;
   padding-top: 16px;
   border-top: 2px solid var(--border-color, #cbd5e1);
   width: 100%;
+  box-sizing: border-box;
 }
 
 .notebook-header {
@@ -856,15 +857,21 @@ table.yuju-table tr:hover td {
 }
 
 .notebook-lines-container {
-  width: 100%;
+  width: calc(100% + 48px) !important;
+  margin-left: -24px !important;
+  margin-right: -24px !important;
+  margin-bottom: -24px !important;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid #cbd5e1;
+  border-top: 1.5px solid #cbd5e1;
+  border-bottom-left-radius: var(--radius-lg, 12px);
+  border-bottom-right-radius: var(--radius-lg, 12px);
+  overflow: hidden;
 }
 
 .notebook-line {
-  height: 32px;
-  border-bottom: 1px solid #e2e8f0;
+  height: 34px;
+  border-bottom: 1px solid #cbd5e1;
   width: 100%;
 }
 
@@ -919,6 +926,9 @@ table.yuju-table tr:hover td {
     display: flex !important;
     flex-direction: column !important;
     width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    margin-bottom: 0 !important;
     box-sizing: border-box !important;
   }
   .notebook-header {
@@ -930,14 +940,17 @@ table.yuju-table tr:hover td {
   .notebook-lines-container {
     flex: 1 !important;
     width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    margin-bottom: 0 !important;
     border-top: 1.5px solid #000 !important;
-    border-bottom: 1px solid #475569 !important;
+    border-bottom: 1.5px solid #000 !important;
     background-image: repeating-linear-gradient(
       to bottom,
       transparent,
       transparent 27px,
-      #475569 27px,
-      #475569 28px
+      #64748b 27px,
+      #64748b 28px
     ) !important;
   }
   .notebook-line {

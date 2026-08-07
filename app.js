@@ -20,6 +20,7 @@ let state = {
   enrollments: [],            // 수강신청 목록
   attendance: [],             // 출결 기록 목록
   dailyPlans: [],             // 당일 진도 계획/실적 목록
+  progressNotes: [],          // 수업 메모 & 원장/강사 피드백 지시사항 목록
   notices: [],                // 공지사항 목록
   consultations: [],          // 상담 신청 내역 목록
   monthlyOperations: {},      // 월별 학원 가동 정보 (키: 'YYYY-MM', 값: { 'YYYY-MM-DD': { isHoliday, isClosed, start, end } })
@@ -46,6 +47,11 @@ function loadOfflineMockData() {
       localNotices = JSON.parse(localStorage.getItem("yuju_local_notices") || "[]");
     } catch(e) {}
 
+    let localProgressNotes = [];
+    try {
+      localProgressNotes = JSON.parse(localStorage.getItem("yuju_local_progress_notes") || "[]");
+    } catch(e) {}
+
     state.students = (window.mockData.students || []).map(r => r.data || r);
     state.students.sort((a, b) => (a.name || "").localeCompare(b.name || "", 'ko'));
     state.teachers = (window.mockData.teachers || []).map(r => r.data || r).filter(t => t && t.id && !deletedTcIds.includes(t.id));
@@ -54,6 +60,7 @@ function loadOfflineMockData() {
     state.enrollments = (window.mockData.enrollments || []).map(r => r.data || r);
     state.attendance = (window.mockData.attendance || []).map(r => r.data || r);
     state.dailyPlans = (window.mockData.dailyPlans || []).map(r => r.data || r);
+    state.progressNotes = localProgressNotes;
     
     const mockNotices = (window.mockData.notices || []).map(r => r.data || r);
     const noticeMap = new Map();
@@ -245,6 +252,7 @@ async function loadAllData() {
       resEnrollments,
       resAttendance,
       resDailyPlans,
+      resProgressNotes,
       resNotices,
       resConsultations,
       resOperations
@@ -256,6 +264,7 @@ async function loadAllData() {
       supabaseClient.from("agy_enrollments").select("*"),
       supabaseClient.from("agy_attendance").select("*"),
       supabaseClient.from("agy_daily_plans").select("*"),
+      supabaseClient.from("agy_progress_notes").select("*"),
       supabaseClient.from("agy_notices").select("*"),
       supabaseClient.from("agy_consultations").select("*"),
       supabaseClient.from("agy_monthly_operations").select("*")
@@ -271,6 +280,11 @@ async function loadAllData() {
       deletedNoticeIds = JSON.parse(localStorage.getItem("yuju_deleted_notice_ids") || "[]").map(String);
     } catch(e) {}
 
+    let localProgressNotes = [];
+    try {
+      localProgressNotes = JSON.parse(localStorage.getItem("yuju_local_progress_notes") || "[]");
+    } catch(e) {}
+
     state.students = (resStudents.data || []).map(r => r.data);
     state.students.sort((a, b) => (a.name || "").localeCompare(b.name || "", 'ko'));
     let loadedTeachers = resTeachers.data ? resTeachers.data.map(r => r.data || r).filter(Boolean) : null;
@@ -283,6 +297,15 @@ async function loadAllData() {
     state.enrollments = (resEnrollments.data || []).map(r => r.data);
     state.attendance = (resAttendance.data || []).map(r => r.data);
     state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
+    
+    const dbNotes = (resProgressNotes && resProgressNotes.data) ? resProgressNotes.data.map(r => r.data || r).filter(Boolean) : [];
+    const noteMap = new Map();
+    [...dbNotes, ...localProgressNotes].forEach(n => {
+      if (n && n.studentId && n.date) {
+        noteMap.set(`${n.studentId}_${n.date}`, n);
+      }
+    });
+    state.progressNotes = Array.from(noteMap.values());
 
     let loadedNotices = resNotices.data ? resNotices.data.map(r => r.data || r).filter(Boolean) : null;
     if (loadedNotices === null) {
@@ -829,7 +852,7 @@ function renderSidebarMenu() {
     { key: "teachers", label: "강사 관리", icon: "graduation-cap", roles: ["director"] },
     { key: "enrollments", label: "수강 관리(시간표)", icon: "calendar-days", roles: ["director", "teacher", "assistant"] },
     { key: "studentEnrollments", label: "학생별 시간표", icon: "user-check", roles: ["director", "teacher", "assistant", "student"] },
-    { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant"] },
+    { key: "progress", label: "진도 계획/실적", icon: "book-open-check", roles: ["director", "teacher", "assistant", "student"] },
     { key: "teacherLog", label: "근무 일지 작성", icon: "clock", roles: ["teacher"] },
     { key: "teacherLogApproval", label: "강사 출퇴근 결재", icon: "badge-check", roles: ["director", "assistant"] }
   ];
@@ -4884,8 +4907,52 @@ async function handleSaveEnrollment(dateStr) {
 window.handleSaveEnrollment = handleSaveEnrollment;
 
 // --- ⑥ 진도 관리 뷰 ---
-let progressTab = "plan"; // plan: 당일계획수립, result: 당일실적등록, stats: 진도이력조회
+let progressTab = "plan"; // plan: 당일계획수립, result: 당일실적등록, stats: 누적진도관리
 let progressSelectedStudentId = ""; // 원장/강사가 진도관리에서 선택한 학생 유지용 변수
+let progressStartDate = new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split("T")[0];
+let progressEndDate = new Date().toISOString().split("T")[0];
+
+function changeProgressStartDate(val) {
+  progressStartDate = val;
+  renderProgress();
+}
+function changeProgressEndDate(val) {
+  progressEndDate = val;
+  renderProgress();
+}
+function setQuickProgressRange(rangeType) {
+  const todayStr = state.selectedDate || new Date().toISOString().split("T")[0];
+  const today = new Date(todayStr);
+  if (rangeType === 'thisMonth') {
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
+    progressStartDate = firstDay;
+    progressEndDate = todayStr;
+  } else if (rangeType === 'last30') {
+    const d = new Date(today);
+    d.setDate(d.getDate() - 30);
+    progressStartDate = d.toISOString().split("T")[0];
+    progressEndDate = todayStr;
+  } else if (rangeType === 'all') {
+    progressStartDate = "2020-01-01";
+    progressEndDate = todayStr;
+  }
+  renderProgress();
+}
+window.changeProgressStartDate = changeProgressStartDate;
+window.changeProgressEndDate = changeProgressEndDate;
+window.setQuickProgressRange = setQuickProgressRange;
+
+function formatMinutes(minutes) {
+  if (!minutes || minutes === 0) return "0분";
+  const absM = Math.abs(minutes);
+  const h = Math.floor(absM / 60);
+  const m = absM % 60;
+  let res = "";
+  if (h > 0) res += `${h}시간 `;
+  if (m > 0 || h === 0) res += `${m}분`;
+  return res.trim();
+}
+window.formatMinutes = formatMinutes;
 
 // 학생 계획수립 모드 진입 처리 (대기화면 → 실제 계획 입력화면)
 function enterStudentPlanMode() {
@@ -4896,28 +4963,34 @@ window.enterStudentPlanMode = enterStudentPlanMode;
 
 function renderProgress() {
   const container = document.getElementById("mainContent");
+  const isStudent = state.currentUser && state.currentUser.role === 'student';
   
-  // 로그인 학생인 경우 접근 차단 (원장/강사 전용 메뉴)
-  if (state.currentUser && state.currentUser.role === 'student') {
-    alert("진도 관리는 원장/강사 전용 메뉴입니다.");
-    navigate("studentEnrollments");
-    return;
-  }
-  
-  if (!progressSelectedStudentId && state.students.length > 0) {
-    progressSelectedStudentId = state.students[0].id;
-  }
-  if (progressSelectedStudentId && !state.students.some(s => s.id === progressSelectedStudentId)) {
-    progressSelectedStudentId = state.students.length > 0 ? state.students[0].id : "";
+  // 학생의 경우 자신의 데이터만 볼 수 있도록 자동 설정
+  if (isStudent) {
+    const myStudentObj = state.students.find(s => s.id === state.currentUser.ref_id);
+    if (myStudentObj) {
+      progressSelectedStudentId = myStudentObj.id;
+    } else if (state.students.length > 0) {
+      progressSelectedStudentId = state.students[0].id;
+    }
+  } else {
+    if (!progressSelectedStudentId && state.students.length > 0) {
+      progressSelectedStudentId = state.students[0].id;
+    }
+    if (progressSelectedStudentId && !state.students.some(s => s.id === progressSelectedStudentId)) {
+      progressSelectedStudentId = state.students.length > 0 ? state.students[0].id : "";
+    }
   }
   
   const progressStudentId = progressSelectedStudentId;
   const selectedStudentObj = state.students.find(s => s.id === progressStudentId);
 
-  // 드롭다운 리스트
-  const studentOptions = state.students.map(s => `
-    <option value="${s.id}" ${progressStudentId === s.id ? 'selected' : ''}>${escapeHTML(s.name)}</option>
-  `).join("");
+  // 드롭다운 리스트 (학생은 자기 자신만)
+  const studentOptions = isStudent
+    ? (selectedStudentObj ? `<option value="${selectedStudentObj.id}" selected>${escapeHTML(selectedStudentObj.name)}</option>` : '')
+    : state.students.map(s => `
+        <option value="${s.id}" ${progressStudentId === s.id ? 'selected' : ''}>${escapeHTML(s.name)}</option>
+      `).join("");
 
   const quotes = window.mockData.quotes || [
     "배움의 깊이를 더하는 상아탑에서의 하루가 미래를 바꿉니다.",
@@ -4925,18 +4998,30 @@ function renderProgress() {
   ];
   const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
 
+  const heroBadgeText = isStudent ? '📚 나의 진도 계획 및 누적 이행 분석' : '🐋 1:1 맞춤 학습 코칭 & 누적 진도 분석';
+  let heroTitle = "";
+  if (progressTab === "stats") {
+    heroTitle = isStudent 
+      ? `나의 기간별 누적 진도 및 계획 이행 분석 (${progressStartDate} ~ ${progressEndDate})`
+      : `${selectedStudentObj ? `[${escapeHTML(selectedStudentObj.name)}] 학생` : '학생'} 누적 진도 및 계획 이행율 분석 (${progressStartDate} ~ ${progressEndDate})`;
+  } else {
+    heroTitle = isStudent
+      ? `나의 당일 학습 계획 등록 및 실적 확인 (${state.selectedDate})`
+      : `${selectedStudentObj ? `[${escapeHTML(selectedStudentObj.name)}] 학생` : '학생'} 당일 학습 계획 및 진도 수립`;
+  }
+
   container.innerHTML = `
     <div class="page-header no-print">
       <div class="page-title">
-        <h1>당일 진도 계획 / 실적 관리</h1>
-        <p>선택한 학생의 등원 수강 계획을 등록하고 실적을 기입하여 확정합니다.</p>
+        <h1>진도 계획 / 실적 / 누적 진도 관리</h1>
+        <p>${isStudent ? '학습 계획 수립, 당일 실적 등록 및 기간별 누적 계획 이행률을 분석합니다.' : '학생별 당일 학습 계획 확정, 실적 등록 검재 및 누적 진도 이행을 통합 관리합니다.'}</p>
       </div>
       <div class="action-bar">
         <button class="btn btn-secondary no-print" onclick="window.print()"><i data-lucide="printer"></i> 진도표 인쇄하기</button>
       </div>
     </div>
 
-    <!-- 원장/강사 뷰 밍크고래 학습 코칭 히어로 바 -->
+    <!-- 히어로 배너 -->
     <div class="no-print" style="
       position: relative; overflow: hidden; border-radius: var(--radius-lg); margin-bottom: 20px;
       background: linear-gradient(135deg, rgba(10, 60, 35, 0.78), rgba(8, 45, 25, 0.88)),
@@ -4945,10 +5030,10 @@ function renderProgress() {
     ">
       <div style="max-width: 720px;">
         <div style="display: inline-block; background: rgba(197,155,39,0.3); color: var(--accent-gold); border: 1px solid var(--accent-gold); padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 800; margin-bottom: 8px;">
-          🐋 원장/강사 1:1 맞춤 학습 코칭 & 진도 관리
+          ${heroBadgeText}
         </div>
         <h2 style="font-size: 22px; font-weight: 900; color: #fff; margin-bottom: 6px; word-break: keep-all;">
-          ${selectedStudentObj ? `[${escapeHTML(selectedStudentObj.name)}] 학생` : '학생'} 당일 학습 계획 및 진도 수립
+          ${heroTitle}
         </h2>
         <p style="font-size: 14px; color: rgba(255,255,255,0.9); margin: 0; line-height: 1.5; font-style: italic;">
           &ldquo;${randomQuote}&rdquo;
@@ -4959,16 +5044,29 @@ function renderProgress() {
     <div class="tabs-navigation no-print">
       <button class="tab-btn ${progressTab === 'plan' ? 'active' : ''}" onclick="toggleProgressTab('plan')">📝 당일 계획 수립</button>
       <button class="tab-btn ${progressTab === 'result' ? 'active' : ''}" onclick="toggleProgressTab('result')">🏆 당일 실적 등록</button>
+      <button class="tab-btn ${progressTab === 'stats' ? 'active' : ''}" onclick="toggleProgressTab('stats')">📊 누적 진도 관리</button>
     </div>
     
-    <div style="display:flex; gap:12px; margin-bottom:20px; align-items:center;" class="no-print">
-      <strong style="font-size:14px; font-weight:800;">학생 선택:</strong>
-      <select id="progressStSelector" onchange="changeProgressStudent(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px;">
-        ${studentOptions}
-      </select>
+    <div style="display:flex; gap:12px; margin-bottom:20px; align-items:center; flex-wrap:wrap;" class="no-print">
+      ${isStudent
+        ? `<strong style="font-size:14px; font-weight:800;">학생:</strong>
+           <select id="progressStSelector" disabled style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px; background:#f3f4f6;">${studentOptions}</select>`
+        : `<strong style="font-size:14px; font-weight:800;">학생 선택:</strong>
+           <select id="progressStSelector" onchange="changeProgressStudent(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px;">${studentOptions}</select>`
+      }
       
-      <strong style="font-size:14px; font-weight:800; margin-left:12px;">날짜 선택:</strong>
-      <input type="date" id="progressDateSelector" value="${state.selectedDate}" onchange="changeProgressDate(this.value)" style="padding:6px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px;">
+      ${progressTab === 'stats' ? `
+        <strong style="font-size:14px; font-weight:800; margin-left:12px;">조회 기간:</strong>
+        <input type="date" id="progressStartDateSelector" value="${progressStartDate}" onchange="changeProgressStartDate(this.value)" style="padding:6px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px;">
+        <span style="font-weight:700;">~</span>
+        <input type="date" id="progressEndDateSelector" value="${progressEndDate}" onchange="changeProgressEndDate(this.value)" style="padding:6px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px;">
+        <button class="btn btn-secondary" onclick="setQuickProgressRange('thisMonth')" style="padding:6px 12px; font-size:12px; font-weight:700;">이번달</button>
+        <button class="btn btn-secondary" onclick="setQuickProgressRange('last30')" style="padding:6px 12px; font-size:12px; font-weight:700;">최근 30일</button>
+        <button class="btn btn-secondary" onclick="setQuickProgressRange('all')" style="padding:6px 12px; font-size:12px; font-weight:700;">전체</button>
+      ` : `
+        <strong style="font-size:14px; font-weight:800; margin-left:12px;">날짜 선택:</strong>
+        <input type="date" id="progressDateSelector" value="${state.selectedDate}" onchange="changeProgressDate(this.value)" style="padding:6px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-weight:700; font-size:14px;">
+      `}
     </div>
     
     <div id="progressTabContent"></div>
@@ -5003,7 +5101,179 @@ function renderProgressTabContent(studentId) {
     return;
   }
 
-  // 출석 또는 수강 시간표 등록 여부 체크 (수강 신청이 안 된 날은 진도관리 작성 접근 차단)
+  // 누적 진도 관리(stats) 탭 처리
+  if (progressTab === "stats") {
+    const plansInRange = state.dailyPlans.filter(p => 
+      p.studentId === studentId && 
+      p.date >= progressStartDate && 
+      p.date <= progressEndDate
+    );
+    
+    // 정렬 (날짜 내림차순, 시작시간 오름차순)
+    plansInRange.sort((a, b) => {
+      const dComp = (b.date || "").localeCompare(a.date || "");
+      if (dComp !== 0) return dComp;
+      return (a.plannedStartTime || "").localeCompare(b.plannedStartTime || "");
+    });
+
+    const totalPlanCount = plansInRange.length;
+    const completedCount = plansInRange.filter(p => p.isCompleted || p.isConfirmed).length;
+    const fulfillmentRate = totalPlanCount > 0 ? ((completedCount / totalPlanCount) * 100).toFixed(1) : "0.0";
+    
+    let totalPlannedMinutes = 0;
+    let totalActualMinutes = 0;
+
+    plansInRange.forEach(p => {
+      const planMin = p.plannedDuration || calculateMinutes(p.plannedStartTime, p.plannedEndTime) || 0;
+      totalPlannedMinutes += planMin;
+
+      if (p.actualStartTime && p.actualEndTime) {
+        totalActualMinutes += calculateMinutes(p.actualStartTime, p.actualEndTime);
+      } else if (p.isCompleted || p.isConfirmed) {
+        totalActualMinutes += planMin;
+      }
+    });
+
+    const diffMinutesTotal = totalActualMinutes - totalPlannedMinutes;
+    let diffBadgeTotalHTML = "";
+    if (diffMinutesTotal < 0) {
+      diffBadgeTotalHTML = `<span style="color:#0284c7; font-weight:900;">⚡ ${formatMinutes(Math.abs(diffMinutesTotal))} 단축</span>`;
+    } else if (diffMinutesTotal > 0) {
+      diffBadgeTotalHTML = `<span style="color:#ea580c; font-weight:900;">⏰ ${formatMinutes(diffMinutesTotal)} 지연</span>`;
+    } else {
+      diffBadgeTotalHTML = `<span style="color:#374151; font-weight:900;">🎯 정시 완료</span>`;
+    }
+
+    // 테이블 행 구성
+    let rowsHTML = "";
+    if (plansInRange.length === 0) {
+      rowsHTML = `<tr><td colspan="7" style="text-align:center; padding:40px; color:var(--text-muted);">선택한 기간 (${progressStartDate} ~ ${progressEndDate}) 내 등록된 진도 계획 및 실적이 없습니다.</td></tr>`;
+    } else {
+      rowsHTML = plansInRange.map((p, idx) => {
+        const planMin = p.plannedDuration || calculateMinutes(p.plannedStartTime, p.plannedEndTime) || 0;
+        const hasActualTimes = !!(p.actualStartTime && p.actualEndTime);
+        const actualMin = hasActualTimes 
+          ? calculateMinutes(p.actualStartTime, p.actualEndTime) 
+          : ((p.isCompleted || p.isConfirmed) ? planMin : 0);
+        
+        const isDone = p.isCompleted || p.isConfirmed;
+
+        let diffBadgeHTML = "";
+        if (!isDone && !hasActualTimes) {
+          diffBadgeHTML = `<span class="badge badge-gray" style="font-size:11px;">미이행</span>`;
+        } else {
+          const diff = actualMin - planMin;
+          if (diff < 0) {
+            diffBadgeHTML = `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; font-size:11px; font-weight:700;">⚡ ${formatMinutes(Math.abs(diff))} 단축</span>`;
+          } else if (diff > 0) {
+            diffBadgeHTML = `<span class="badge" style="background:#fff7ed; color:#c2410c; border:1px solid #ffedd5; font-size:11px; font-weight:700;">⏰ ${formatMinutes(diff)} 지연</span>`;
+          } else {
+            diffBadgeHTML = `<span class="badge" style="background:#f3f4f6; color:#374151; border:1px solid #e5e7eb; font-size:11px; font-weight:700;">🎯 정시 이행</span>`;
+          }
+        }
+
+        let statusBadgeHTML = "";
+        if (p.isConfirmed) {
+          statusBadgeHTML = `<span class="badge badge-emerald" style="font-size:11px;">✅ 강사/원장 확정</span>`;
+        } else if (p.isApprovalRequested || p.isCompleted) {
+          statusBadgeHTML = `<span class="badge badge-primary" style="font-size:11px;">📝 실적 제출(승인대기)</span>`;
+        } else if (p.isPlanConfirmed) {
+          statusBadgeHTML = `<span class="badge badge-warning" style="background:#fef3c7; color:#92400e; font-size:11px;">⏳ 실적 작성대기</span>`;
+        } else {
+          statusBadgeHTML = `<span class="badge badge-gray" style="font-size:11px;">계획 승인대기</span>`;
+        }
+
+        return `
+          <tr style="border-bottom:1px solid var(--border-color); font-size:13px;">
+            <td style="padding:10px 12px; font-weight:700;">${p.date}</td>
+            <td style="padding:10px 12px; font-weight:700; color:var(--text-dark);">${escapeHTML(p.activityName)}</td>
+            <td style="padding:10px 12px; color:var(--text-muted);">${p.plannedStartTime} ~ ${p.plannedEndTime} (${planMin}분)</td>
+            <td style="padding:10px 12px;">${hasActualTimes ? `${p.actualStartTime} ~ ${p.actualEndTime}` : '<span style="color:var(--text-muted);">-</span>'}</td>
+            <td style="padding:10px 12px; text-align:center; font-weight:700;">
+              계획 ${planMin}분 / ${isDone ? `실제 ${actualMin}분` : '<span style="color:var(--text-muted); font-weight:400;">미입력</span>'}
+            </td>
+            <td style="padding:10px 12px; text-align:center;">${diffBadgeHTML}</td>
+            <td style="padding:10px 12px; text-align:center;">${statusBadgeHTML}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    target.innerHTML = `
+      <div class="card progress-print-card">
+        <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <span>📊 ${escapeHTML(st.name)} 학생 누적 진도 & 계획 이행 성과 분석 (${progressStartDate} ~ ${progressEndDate})</span>
+          <span style="font-size:12px; font-weight:600; color:var(--text-muted);">총 ${totalPlanCount}개 계획 집계</span>
+        </div>
+
+        <!-- 5개 주요 KPI 요약 카드 GRID -->
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-bottom:24px;">
+          <!-- 1. 누적 계획 건수 -->
+          <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:center; box-shadow:var(--shadow-sm);">
+            <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">📋 누적 총 계획 수</div>
+            <div style="font-size:24px; font-weight:900; color:var(--primary-color);">${totalPlanCount} <span style="font-size:14px; font-weight:700;">건</span></div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">기간 내 등록된 총 계획</div>
+          </div>
+          
+          <!-- 2. 이행 완료 수 & 이행률 -->
+          <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:center; box-shadow:var(--shadow-sm);">
+            <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">🏆 누적 이행 완료 수</div>
+            <div style="font-size:24px; font-weight:900; color:#059669;">${completedCount} <span style="font-size:14px; font-weight:700;">건</span></div>
+            <div style="font-size:12px; font-weight:800; color:#059669; margin-top:4px;">이행률: ${fulfillmentRate}%</div>
+          </div>
+          
+          <!-- 3. 총 계획 시간 -->
+          <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:center; box-shadow:var(--shadow-sm);">
+            <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">⏱️ 총 누적 계획 시간</div>
+            <div style="font-size:18px; font-weight:900; color:var(--text-dark);">${formatMinutes(totalPlannedMinutes)}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">총 ${totalPlannedMinutes}분 계획</div>
+          </div>
+          
+          <!-- 4. 총 실제 소요 시간 -->
+          <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:center; box-shadow:var(--shadow-sm);">
+            <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">🎯 총 누적 실적 소요 시간</div>
+            <div style="font-size:18px; font-weight:900; color:#2563eb;">${formatMinutes(totalActualMinutes)}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">총 ${totalActualMinutes}분 소요</div>
+          </div>
+          
+          <!-- 5. 계획 대비 시간 차이 -->
+          <div style="background:${diffMinutesTotal < 0 ? '#f0f9ff' : (diffMinutesTotal > 0 ? '#fff7ed' : 'var(--bg-app)')}; border:1px solid ${diffMinutesTotal < 0 ? '#bae6fd' : (diffMinutesTotal > 0 ? '#fed7aa' : 'var(--border-color)')}; border-radius:var(--radius-md); padding:16px; text-align:center; box-shadow:var(--shadow-sm);">
+            <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">⚖️ 계획 대비 시간 차이</div>
+            <div style="font-size:18px; font-weight:900;">${diffBadgeTotalHTML}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${diffMinutesTotal < 0 ? '계획보다 빠른 효율 이행' : (diffMinutesTotal > 0 ? '계획보다 추가 소요 발생' : '계획시간 정시 완료')}</div>
+          </div>
+        </div>
+
+        <!-- 기간별 상세 내역 테이블 -->
+        <div style="font-weight:800; font-size:15px; margin-bottom:12px; display:flex; align-items:center; gap:6px;">
+          📝 기간별 누적 진도 상세 내역 (${plansInRange.length}건)
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table class="table" style="width:100%; border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg-app); border-bottom:2px solid var(--border-color); text-align:left; font-size:12px; color:var(--text-muted);">
+                <th style="padding:10px 12px; width:100px;">날짜</th>
+                <th style="padding:10px 12px;">활동 / 과제명</th>
+                <th style="padding:10px 12px; width:160px;">계획 시간</th>
+                <th style="padding:10px 12px; width:160px;">실제 시간</th>
+                <th style="padding:10px 12px; width:140px; text-align:center;">소요시간 (계획/실제)</th>
+                <th style="padding:10px 12px; width:130px; text-align:center;">단축/지연 차이</th>
+                <th style="padding:10px 12px; width:130px; text-align:center;">이행 상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHTML}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+    return;
+  }
+
+  // 당일 출석 또는 수강 시간표 등록 여부 체크 (당일 계획/실적 탭용)
   const hasAttendance = state.attendance.some(a => a.studentId === studentId && a.date === state.selectedDate);
   const hasEnrollment = state.enrollments.some(e => e.studentId === studentId && e.date === state.selectedDate);
   if (!hasAttendance && !hasEnrollment) {
@@ -5013,7 +5283,8 @@ function renderProgressTabContent(studentId) {
         <h2 style="font-size:20px; font-weight:800; color:var(--text-dark); margin-bottom:12px;">수강신청 미등록 날짜입니다</h2>
         <p style="font-size:14px; color:var(--text-muted); max-width:480px; margin:0 auto 20px; line-height:1.6;">
           선택하신 날짜(<strong>${state.selectedDate}</strong>)는 [<strong>${escapeHTML(st.name)}</strong>] 학생의 수강신청이 등록되어 있지 않습니다.<br>
-          해당 날짜에 수강신청이 완료되어야 진도 관리를 작성 및 관리할 수 있습니다.
+          해당 날짜에 수강신청이 완료되어야 당일 진도 관리를 작성 및 관리할 수 있습니다.<br>
+          (단, <strong>[누적 진도 관리]</strong> 탭에서는 수강신청 여부와 상관없이 전체 진도 내역 및 이행율 조회가 가능합니다.)
         </p>
         <button class="btn btn-emerald" onclick="navigate('enrollments')" style="padding:10px 24px; font-weight:700;">
           📅 수강 관리(시간표) 메뉴로 이동하여 신청하기
@@ -5024,35 +5295,82 @@ function renderProgressTabContent(studentId) {
     return;
   }
   
-  // 오늘 날짜 계획 리스트 필터링
   const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
   const isStudent = state.currentUser.role === 'student';
   
-  // 출력물 하단 노트를 위한 가로줄 영역 (페이지 끝까지 100% 확장)
-  const notebookLinesHTML = `
-    <div class="progress-print-notebook">
-      <div class="notebook-header">
-        ✍️ <strong>수업 메모 & 원장/강사 피드백 노트 (자유 작성란)</strong>
-      </div>
-      <div class="notebook-lines-container">
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-        <div class="notebook-line"></div>
-      </div>
+  // 수업 메모 & 원장/강사 피드백 지시사항 로딩
+  const noteObj = (state.progressNotes || []).find(n => n.studentId === studentId && n.date === state.selectedDate);
+  const noteContent = noteObj ? (noteObj.content || "") : "";
+  const updatedBy = noteObj ? (noteObj.updatedBy || "원장/강사") : "";
+  
+  const notebookLinesContainerHTML = `
+    <div class="notebook-lines-container" style="margin-top:16px;">
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
+      <div class="notebook-line"></div>
     </div>
   `;
+
+  let notebookLinesHTML = "";
+  if (isStudent) {
+    notebookLinesHTML = `
+      <div class="progress-print-notebook" style="margin-top:20px; border:1px solid ${noteContent ? '#bbf7d0' : 'var(--border-color)'}; border-radius:var(--radius-md); padding:18px; background:${noteContent ? '#f0fdf4' : 'var(--bg-card)'}; box-shadow:var(--shadow-sm);">
+        <div style="font-weight:800; font-size:15px; color:${noteContent ? '#166534' : 'var(--primary-color)'}; margin-bottom:10px; border-bottom:2px solid ${noteContent ? '#86efac' : 'var(--border-color)'}; padding-bottom:8px; display:flex; align-items:center; gap:6px;">
+          ✍️ <strong>원장/강사 피드백 노트 & 학습 지시사항</strong>
+        </div>
+        ${noteContent ? `
+          <div style="background:#fff; border:1px solid #bbf7d0; border-radius:var(--radius-sm); padding:14px; font-size:14px; line-height:1.7; color:#1e293b; white-space:pre-wrap; font-weight:600;">
+            ${escapeHTML(noteContent)}
+          </div>
+          <div style="text-align:right; font-size:11px; color:#059669; margin-top:6px; font-weight:700;">
+            ✍️ 작성자: ${escapeHTML(updatedBy)} 선생님
+          </div>
+        ` : `
+          <div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px;">
+            📌 오늘 등록된 원장/강사 선생님의 피드백 및 지시사항이 없습니다.
+          </div>
+        `}
+        
+        ${notebookLinesContainerHTML}
+      </div>
+    `;
+  } else {
+    notebookLinesHTML = `
+      <div class="progress-print-notebook" style="margin-top:20px; border:1px solid var(--border-color); border-radius:var(--radius-md); padding:18px; background:var(--bg-card); box-shadow:var(--shadow-sm);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:2px solid var(--border-color); padding-bottom:8px; flex-wrap:wrap; gap:8px;">
+          <div style="font-weight:800; font-size:15px; color:var(--primary-color); display:flex; align-items:center; gap:6px;">
+            ✍️ <strong>수업 메모 & 원장/강사 피드백 노트 (학생 코칭 지시사항)</strong>
+          </div>
+          <button class="btn btn-emerald" style="padding:6px 14px; font-size:12px; font-weight:700;" onclick="saveProgressNote('${studentId}')">
+            💾 피드백/지시사항 저장
+          </button>
+        </div>
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">
+          * 작성하신 지시사항/피드백은 학생 진도 화면에 즉시 전달되며, 진도표 인쇄 시 하단 메모에 함께 출력됩니다.
+        </p>
+        <textarea id="progressFeedbackNote_${studentId}" rows="4" placeholder="원장/강사 피드백 및 오늘 수업 지시사항을 입력해 주세요. (예: 3장 개념 확인 후 오답 노트 작성, 15:30 단어 시험 실시 등)" style="width:100%; padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-size:14px; line-height:1.6; resize:vertical; background:#fff; color:var(--text-dark); font-family:inherit;">${escapeHTML(noteContent)}</textarea>
+        
+        ${notebookLinesContainerHTML}
+      </div>
+    `;
+  }
 
   if (progressTab === "plan") {
     // --- 1. 당일 계획 수립 탭 ---
@@ -5076,7 +5394,7 @@ function renderProgressTabContent(studentId) {
                   ${makeTimeSelectHTML('edit_actEnd_' + p.id, p.plannedEndTime, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
                 `
               }
-              <span style="font-size:12px; font-weight:700; width:70px; text-align:center;">${p.plannedDuration}분</span>
+              <span style="font-size:12px; font-weight:700; width:60px; text-align:center;">${p.plannedDuration}분</span>
               
               <div style="display:flex; gap:6px; align-items:center;">
                 ${p.isPlanConfirmed 
@@ -5084,6 +5402,7 @@ function renderProgressTabContent(studentId) {
                   : `
                     <span class="badge badge-gray">승인대기</span>
                     <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; border:1px solid var(--border-color);" onclick="updatePlanDetails('${p.id}')">수정저장</button>
+                    <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; color:#e11d48; border:1px solid #fda4af;" onclick="deletePlanRecord('${p.id}')">🗑️ 삭제</button>
                   `
                 }
               </div>
@@ -5108,6 +5427,7 @@ function renderProgressTabContent(studentId) {
                   ` 
                   : `<button class="btn btn-emerald" style="padding:6px 10px; font-size:11px; background:var(--accent-gold); color:#3d1a00; border:none;" onclick="approvePlan('${p.id}')">승인</button>`
                 }
+                <button class="btn btn-secondary" style="padding:6px 10px; font-size:11px; color:#e11d48; border:1px solid #fda4af;" onclick="deletePlanRecord('${p.id}')">🗑️ 삭제</button>
               </div>
             </div>
           `;
@@ -5123,11 +5443,12 @@ function renderProgressTabContent(studentId) {
         const defaultPlan = lastUncompleted[idx] || { activityName: "", start: "14:00", end: "15:00" };
         
         return `
-          <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
+          <div class="plan-new-row" style="display:flex; gap:8px; margin-bottom:10px; align-items:center;">
             <span style="font-weight:700; width:30px;">#${idx + 1}</span>
             <input type="text" id="actName_${idx}" value="${escapeHTML(defaultPlan.activityName)}" placeholder="활동/과제명 입력" style="flex:2; padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
             ${makeTimeSelectHTML('actStart_' + idx, defaultPlan.start, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
             ${makeTimeSelectHTML('actEnd_' + idx, defaultPlan.end, 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
+            <button class="btn btn-secondary" style="padding:6px 10px; font-size:11px; color:#e11d48; border:1px solid #fda4af;" onclick="removeNewPlanRow(this)">🗑️ 삭제</button>
           </div>
         `;
       }).join("");
@@ -5135,35 +5456,52 @@ function renderProgressTabContent(studentId) {
 
     target.innerHTML = `
       <div class="card progress-print-card">
-        <div class="card-title">📖 ${escapeHTML(st.name)} 학생의 당일 계획 등록 대장 (${state.selectedDate})</div>
+        <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <span>📖 ${escapeHTML(st.name)} 학생의 당일 계획 등록 대장 (${state.selectedDate})</span>
+          ${(!isStudent && plansToday.some(p => p.isPlanConfirmed)) ? `
+            <button class="btn btn-secondary" style="padding:5px 12px; font-size:12px; color:var(--accent-red); border:1px solid var(--accent-red); font-weight:bold;" onclick="cancelAllProgressPlans('${studentId}')">
+              ↩️ 전체 승인/확정 취소 (강사/원장)
+            </button>
+          ` : ''}
+        </div>
         
         <div style="margin-bottom:12px;">
           ${plansToday.length === 0 ? `
-            <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
-              * 학생은 등원하자마자 계획을 작성해 제출하며, 강사나 원장의 [계획확정 승인]을 득한 후 실행합니다. (기본 10줄 제공, 미완료 자동 이월)
-            </p>
+            <div style="background:${isStudent ? '#eff6ff' : '#f0fdf4'}; border:1px solid ${isStudent ? '#bfdbfe' : '#bbf7d0'}; border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px;">
+              <p style="font-size:12px; color:${isStudent ? '#1e40af' : '#166534'}; margin:0; line-height:1.6;">
+                ${isStudent
+                  ? '📝 <strong>학생 안내:</strong> 등원 후 오늘의 학습 계획을 작성하고 [계획 제출하기]를 눌러 주세요. 강사/원장님의 계획 확정 후 실적을 입력할 수 있습니다. (미완료 항목은 다음 날 자동 이월)'
+                  : '✅ <strong>강사/원장 안내:</strong> 학생이 제출한 계획을 검토 후 [계획 추가] 또는 [전체 계획 확정]으로 즉시 확정하거나, 승인/확정된 계획은 [전체 승인/확정 취소]로 언제든지 취소할 수 있습니다.'
+                }
+              </p>
+            </div>
           ` : ''}
           <div id="planFormRows">
             ${planInputs}
           </div>
           
-          ${(plansToday.length === 0 || plansToday.some(p => !p.isPlanConfirmed)) ? `
-            ${isStudent ? `
+          ${isStudent ? `
+            ${(plansToday.length === 0 || plansToday.some(p => !p.isPlanConfirmed)) ? `
               <div style="display:flex; gap:12px; margin-top:16px;">
                 <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
                   <i data-lucide="plus-circle"></i> [+ 계획 추가]
                 </button>
-                <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="submitDailyPlans('${studentId}')">계획 제출하기</button>
+                <button class="btn btn-emerald" style="flex:2; justify-content:center;" onclick="submitDailyPlans('${studentId}')">📤 계획 제출하기 (승인요청)</button>
               </div>
-            ` : `
-              <div style="display:flex; gap:12px; margin-top:16px;">
-                <button class="btn btn-secondary" style="flex:1; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
-                  <i data-lucide="plus-circle"></i> [+ 계획 추가]
-                </button>
-                <button class="btn btn-emerald" style="flex:2; justify-content:center; background:var(--accent-gold); color:#3d1a00; font-weight:bold;" onclick="confirmProgressPlans('${studentId}')">전체 계획 확정</button>
-              </div>
-            `}
-          ` : ''}
+            ` : ''}
+          ` : `
+            <div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">
+              <button class="btn btn-secondary" style="flex:1; min-width:130px; justify-content:center; border:1px solid var(--border-color);" onclick="addPlanRow('${studentId}')">
+                <i data-lucide="plus-circle"></i> [+ 계획 추가]
+              </button>
+              ${(plansToday.length === 0 || plansToday.some(p => !p.isPlanConfirmed)) ? `
+                <button class="btn btn-emerald" style="flex:2; min-width:180px; justify-content:center; background:var(--accent-gold); color:#3d1a00; font-weight:bold;" onclick="confirmProgressPlans('${studentId}')">✅ 전체 계획 확정 (강사/원장)</button>
+              ` : ''}
+              ${plansToday.some(p => p.isPlanConfirmed) ? `
+                <button class="btn btn-secondary" style="flex:2; min-width:180px; justify-content:center; color:var(--accent-red); border:1px solid var(--accent-red); font-weight:bold;" onclick="cancelAllProgressPlans('${studentId}')">↩️ 전체 계획 확정 취소 (강사/원장)</button>
+              ` : ''}
+            </div>
+          `}
         </div>
 
         ${notebookLinesHTML}
@@ -5208,7 +5546,7 @@ function renderProgressTabContent(studentId) {
                     <input type="checkbox" checked disabled style="width:18px; height:18px;">
                     <span style="font-weight:700; font-size:12px; color:#059669;">활동완료 여부</span>
                   </div>
-                  <span class="badge badge-emerald" style="background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; font-weight:800;">✅ 원장/조교 확정 완료</span>
+                  <span class="badge badge-emerald" style="background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; font-weight:800;">✅ 강사/원장 확정 완료</span>
                 ` : `
                   <div style="display:flex; align-items:center; gap:6px;">
                     <input type="checkbox" id="realComp_${p.id}" class="result-bulk-chk" value="${p.id}" style="width:18px; height:18px; cursor:pointer;" ${p.isApprovalRequested ? 'checked' : ''}>
@@ -5226,11 +5564,11 @@ function renderProgressTabContent(studentId) {
       }).join("");
       
       if (resultRows === "") {
-        resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">원장님의 계획 승인이 완료된 항목이 없습니다.<br>계획 승인 완료 후 실적 작성이 가능합니다.</p>`;
+        resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">강사/원장님의 계획 확정이 완료된 항목이 없습니다.<br>📝 계획 수립 탭에서 계획 제출 후 강사/원장의 확정을 받아야 실적 입력이 가능합니다.</p>`;
       }
       
     } else {
-      // 원장/강사 뷰: 학생이 승인요청한 항목(savedPlans) + 오늘 계획하였으나 못한 실적(uncompletedPlans) 분리 표시
+      // 원장/강사 뷰: 학생이 승인요청한 항목(savedPlans) + 오늘 계획하였으나 학생이 미제출한 실적(uncompletedPlans) 분리 표시
       const activePlans = plansToday.filter(p => p.isPlanConfirmed);
       savedPlans = activePlans.filter(p => p.isApprovalRequested || p.isConfirmed);
       uncompletedPlans = activePlans.filter(p => !p.isApprovalRequested && !p.isConfirmed);
@@ -5243,7 +5581,7 @@ function renderProgressTabContent(studentId) {
         return `
           <div class="plan-card ${p.isConfirmed ? 'confirmed' : ''}" style="margin-bottom:16px; padding:16px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <span style="font-weight:800; font-size:15px;">#${idx + 1} - ${escapeHTML(p.activityName)} <span style="font-size:11px; color:var(--primary-color); background:#eff6ff; padding:2px 6px; border-radius:4px; margin-left:6px;">승인요청</span></span>
+              <span style="font-weight:800; font-size:15px;">#${idx + 1} - ${escapeHTML(p.activityName)} ${!p.isConfirmed ? '<span style="font-size:11px; color:var(--primary-color); background:#eff6ff; padding:2px 6px; border-radius:4px; margin-left:6px;">승인요청</span>' : ''}</span>
               <span style="font-size:12px; color:var(--text-muted);">계획: ${p.plannedStartTime}~${p.plannedEndTime} (${p.plannedDuration}분)</span>
             </div>
             
@@ -5263,13 +5601,14 @@ function renderProgressTabContent(studentId) {
                     <input type="checkbox" id="realComp_${p.id}" class="result-bulk-chk" value="${p.id}" style="width:18px; height:18px; cursor:pointer;" checked>
                     <label for="realComp_${p.id}" style="font-weight:700; font-size:12px; cursor:pointer;">활동완료 여부</label>
                   </div>
-                  <button class="btn btn-emerald" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', true)">진도 확정</button>
+                  <button class="btn btn-emerald" style="padding:6px 12px; font-size:12px;" onclick="saveStudentResult('${p.id}', true)">✅ 실적 확정</button>
                 ` : `
-                  <div style="display:flex; align-items:center; gap:6px; opacity:0.6;">
+                  <div style="display:flex; align-items:center; gap:6px; opacity:0.8;">
                     <input type="checkbox" checked disabled style="width:18px; height:18px;">
-                    <span style="font-weight:700; font-size:12px;">활동완료 여부</span>
+                    <span style="font-weight:700; font-size:12px; color:#059669;">활동완료 여부</span>
                   </div>
-                  <span class="badge badge-emerald">원장/조교 검재 확정 완료</span>
+                  <span class="badge badge-emerald">강사/원장 확정 완료</span>
+                  <button class="btn btn-secondary" style="padding:5px 10px; font-size:11px; color:var(--accent-red); border:1px solid var(--accent-red);" onclick="cancelStudentResultConfirm('${p.id}')">확정 취소</button>
                 `}
               </div>
             </div>
@@ -5277,33 +5616,35 @@ function renderProgressTabContent(studentId) {
         `;
       }).join("");
 
+      // 미제출 항목: 강사/원장이 직접 실적 등록 및 확정 가능
       let uncompletedRows = uncompletedPlans.map((p, idx) => {
         const actualIn = p.actualStartTime || p.plannedStartTime;
         const actualOut = p.actualEndTime || p.plannedEndTime;
         
         return `
-          <div class="plan-card" style="margin-bottom:16px; padding:16px; border:1px dashed #fda4af; border-radius:var(--radius-md); background:#fafafa; opacity:0.8;">
+          <div class="plan-card" style="margin-bottom:16px; padding:16px; border:1px dashed #fda4af; border-radius:var(--radius-md); background:#fff8f8;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <span style="font-weight:800; font-size:15px; color:#b91c1c;">#${savedPlans.length + idx + 1} - ${escapeHTML(p.activityName)}</span>
               <span style="font-size:12px; color:var(--text-muted);">계획: ${p.plannedStartTime}~${p.plannedEndTime} (${p.plannedDuration}분)</span>
             </div>
+            <p style="font-size:11px; color:#b91c1c; margin:0 0 10px; font-weight:600;">⚠️ 학생 미제출 항목 — 강사/원장이 직접 실적을 입력하고 확정할 수 있습니다.</p>
             
             <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
               <div class="form-group" style="margin-bottom:0; width:140px;">
                 <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 시작시간</label>
-                ${makeTimeSelectHTML('realStart_' + p.id, actualIn, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc; pointer-events:none; opacity:0.6;')}
+                ${makeTimeSelectHTML('realStart_' + p.id, actualIn, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;')}
               </div>
               <div class="form-group" style="margin-bottom:0; width:140px;">
                 <label style="font-size:11px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:4px;">실제 완료시간</label>
-                ${makeTimeSelectHTML('realEnd_' + p.id, actualOut, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc; pointer-events:none; opacity:0.6;')}
+                ${makeTimeSelectHTML('realEnd_' + p.id, actualOut, 'width:100%; padding:6px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:13px; background:#f8fafc;')}
               </div>
               
               <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
-                <div style="display:flex; align-items:center; gap:6px; opacity:0.6;">
-                  <input type="checkbox" disabled style="width:18px; height:18px;">
-                  <span style="font-weight:700; font-size:12px;">활동완료 여부</span>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="checkbox" id="realComp_${p.id}" class="result-bulk-chk" value="${p.id}" style="width:18px; height:18px; cursor:pointer;">
+                  <label for="realComp_${p.id}" style="font-weight:700; font-size:12px; cursor:pointer;">활동완료 여부</label>
                 </div>
-                <span class="badge badge-gray" style="color:#b91c1c; background:#fee2e2; border:1px solid #fecaca; font-weight:800;">미완료</span>
+                <button class="btn btn-emerald" style="padding:6px 12px; font-size:12px; background:var(--accent-gold); color:#3d1a00; border:none;" onclick="saveStudentResult('${p.id}', true)">✅ 직접 실적 확정</button>
               </div>
             </div>
           </div>
@@ -5319,29 +5660,34 @@ function renderProgressTabContent(studentId) {
         ` : ''}
         ${uncompletedRows ? `
           <div>
-            <div style="font-weight:800; font-size:14px; color:#e11d48; margin-bottom:12px; display:flex; align-items:center; gap:6px;">⚠️ 계획하였으나 이행하지 못한 실적 목록 (${uncompletedPlans.length}건)</div>
+            <div style="font-weight:800; font-size:14px; color:#e11d48; margin-bottom:12px; display:flex; align-items:center; gap:6px;">⚠️ 학생 미제출 실적 목록 (강사/원장 직접 등록 가능, ${uncompletedPlans.length}건)</div>
             ${uncompletedRows}
           </div>
         ` : ''}
       `;
 
       if (savedPlans.length === 0 && uncompletedPlans.length === 0) {
-        resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">계획 탭에서 오늘의 계획을 먼저 등록해야 실적 작성이 가능합니다.</p>`;
+        resultRows = `<p style="text-align:center; padding:30px; color:var(--text-muted);">계획 탭에서 오늘의 계획을 먼저 등록 및 확정해야 실적 작성이 가능합니다.</p>`;
       }
     }
 
     const showBulkButton = isStudent 
       ? (plansForResults.length > 0 && plansForResults.some(p => !p.isConfirmed))
-      : (savedPlans.length > 0 && savedPlans.some(p => !p.isConfirmed));
+      : (plansForResults.length > 0 && plansForResults.some(p => !p.isConfirmed));
 
     target.innerHTML = `
       <div class="card progress-print-card">
-        <div class="card-title">🏆 ${escapeHTML(st.name)} 학생 당일 진도 및 완료 실적 기입 대장</div>
+        <div class="card-title">🏆 ${escapeHTML(st.name)} 학생 당일 진도 및 실적 기입 대장
+          ${isStudent
+            ? '<span style="font-size:12px; font-weight:600; color:#1e40af; background:#dbeafe; padding:3px 8px; border-radius:4px; margin-left:8px;">학생 뷰</span>'
+            : '<span style="font-size:12px; font-weight:600; color:#166534; background:#dcfce7; padding:3px 8px; border-radius:4px; margin-left:8px;">강사/원장 뷰 &mdash; 실적 확정 권한</span>'
+          }
+        </div>
         ${resultRows}
         ${showBulkButton ? `
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
-             ${isStudent ? `<button class="btn btn-secondary" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(false)">💾 선택 항목 일괄 저장</button>` : ''}
-             ${state.currentUser.role !== 'student' ? `<button class="btn btn-emerald" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(true)">✅ 선택 항목 일괄 확정</button>` : ''}
+             ${isStudent ? `<button class="btn btn-secondary" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(false)">💾 선택 항목 일괄 저장(승인요청)</button>` : ''}
+             ${!isStudent ? `<button class="btn btn-emerald" style="padding:10px 20px; font-weight:700;" onclick="bulkSaveStudentResults(true)">✅ 선택 항목 일괄 실적 확정 (강사/원장)</button>` : ''}
           </div>
         ` : ''}
 
@@ -5641,6 +5987,109 @@ function startDailyPlanMode(studentId) {
   renderProgressTabContent(studentId);
 }
 
+// 동적 신규 입력 행 삭제 헬퍼
+function removeNewPlanRow(btn) {
+  const row = btn.closest(".plan-new-row");
+  if (row) {
+    row.remove();
+  }
+}
+window.removeNewPlanRow = removeNewPlanRow;
+
+// 당일 계획 수립 항목 DB/state 삭제
+async function deletePlanRecord(planId) {
+  const plan = state.dailyPlans.find(p => p.id === planId);
+  if (!plan) return;
+  
+  if (!confirm(`[${plan.activityName}] 계획 항목을 정말로 삭제하시겠습니까?`)) return;
+  
+  state.dailyPlans = state.dailyPlans.filter(p => p.id !== planId);
+  
+  if (!supabaseClient) {
+    alert("계획 항목이 삭제되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient
+      .from("agy_daily_plans")
+      .delete()
+      .eq("id", planId);
+      
+    if (!error) {
+      alert("계획 항목이 성공적으로 삭제되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("계획 항목 삭제에 실패했습니다.");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.deletePlanRecord = deletePlanRecord;
+
+// 원장/강사 피드백 노트 및 지시사항 저장
+async function saveProgressNote(studentId) {
+  const noteEl = document.getElementById(`progressFeedbackNote_${studentId}`);
+  if (!noteEl) return;
+  
+  const content = noteEl.value.trim();
+  const date = state.selectedDate;
+  
+  let noteObj = (state.progressNotes || []).find(n => n.studentId === studentId && n.date === date);
+  if (noteObj) {
+    noteObj.content = content;
+    noteObj.updatedAt = new Date().toISOString();
+    noteObj.updatedBy = state.currentUser ? (state.currentUser.username || "원장/강사") : "원장/강사";
+  } else {
+    noteObj = {
+      id: `note-${studentId}-${date}`,
+      studentId,
+      date,
+      content,
+      updatedAt: new Date().toISOString(),
+      updatedBy: state.currentUser ? (state.currentUser.username || "원장/강사") : "원장/강사"
+    };
+    if (!state.progressNotes) state.progressNotes = [];
+    state.progressNotes.push(noteObj);
+  }
+
+  // LocalStorage에 임시 저장
+  try {
+    localStorage.setItem("yuju_local_progress_notes", JSON.stringify(state.progressNotes));
+  } catch(e) {}
+
+  if (!supabaseClient) {
+    alert("원장/강사 피드백 지시사항이 성공적으로 저장되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+
+  try {
+    const { error } = await supabaseClient.from("agy_progress_notes").upsert({
+      id: noteObj.id,
+      data: noteObj
+    });
+    
+    if (!error) {
+      alert("원장/강사 피드백 지시사항이 성공적으로 저장되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      console.warn("Supabase agy_progress_notes upsert warning:", error);
+      alert("원장/강사 피드백 지시사항이 성공적으로 저장되었습니다.");
+      renderProgress();
+    }
+  } catch (err) {
+    console.error(err);
+    alert("원장/강사 피드백 지시사항이 성공적으로 저장되었습니다.");
+    renderProgress();
+  }
+}
+window.saveProgressNote = saveProgressNote;
+
 // 계획 수립 동적 1줄씩 추가 (최대 20개)
 function addPlanRow(studentId) {
   const container = document.getElementById("planFormRows");
@@ -5653,6 +6102,7 @@ function addPlanRow(studentId) {
   }
   
   const newRow = document.createElement("div");
+  newRow.className = "plan-new-row";
   newRow.style.display = "flex";
   newRow.style.gap = "8px";
   newRow.style.marginBottom = "10px";
@@ -5663,6 +6113,7 @@ function addPlanRow(studentId) {
     <input type="text" id="actName_${currentCount}" placeholder="활동/과제명 입력" style="flex:2; padding:8px; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
     ${makeTimeSelectHTML('actStart_' + currentCount, '14:00', 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
     ${makeTimeSelectHTML('actEnd_' + currentCount, '15:00', 'flex:1; padding:7px; border:1px solid var(--border-color); border-radius:var(--radius-sm); font-size:14px; background:#f8fafc;')}
+    <button class="btn btn-secondary" style="padding:6px 10px; font-size:11px; color:#e11d48; border:1px solid #fda4af;" onclick="removeNewPlanRow(this)">🗑️ 삭제</button>
   `;
   
   container.appendChild(newRow);
@@ -5974,10 +6425,12 @@ async function cancelApprovePlan(planId) {
   const plan = state.dailyPlans.find(p => p.id === planId);
   if (!plan) return;
   
+  if (!confirm(`[${plan.activityName}] 항목의 계획 승인/확정을 취소하시겠습니까?`)) return;
+
   plan.isPlanConfirmed = false;
   
   if (!supabaseClient) {
-    alert("계획 승인이 취소되었습니다. (오프라인 모드)");
+    alert("계획 승인/확정이 취소되었습니다. (오프라인 모드)");
     renderProgress();
     return;
   }
@@ -5989,7 +6442,7 @@ async function cancelApprovePlan(planId) {
       .eq("id", planId);
       
     if (!error) {
-      alert("계획 승인이 취소되었습니다.");
+      alert("계획 승인/확정이 취소되었습니다.");
       await loadAllData();
       renderProgress();
     } else {
@@ -6000,6 +6453,43 @@ async function cancelApprovePlan(planId) {
   }
 }
 window.cancelApprovePlan = cancelApprovePlan;
+
+// 원장/강사가 해당 학생의 당일 모든 확정된 계획 승인/확정을 일괄 취소
+async function cancelAllProgressPlans(studentId) {
+  const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate && p.isPlanConfirmed);
+  if (plansToday.length === 0) {
+    alert("취소할 확정된 계획이 없습니다.");
+    return;
+  }
+  
+  if (!confirm(`오늘 등록된 ${plansToday.length}개의 계획 승인/확정을 모두 취소하시겠습니까?`)) return;
+  
+  const updates = [];
+  plansToday.forEach(plan => {
+    plan.isPlanConfirmed = false;
+    updates.push({ id: plan.id, data: plan });
+  });
+  
+  if (!supabaseClient) {
+    alert("오늘의 모든 계획 확정이 취소되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+  
+  try {
+    const { error } = await supabaseClient.from("agy_daily_plans").upsert(updates);
+    if (!error) {
+      alert("오늘의 모든 계획 확정이 정상적으로 취소되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("일괄 확정 취소 중 오류가 발생했습니다.");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.cancelAllProgressPlans = cancelAllProgressPlans;
 
 // 원장/강사가 학생의 unconfirmed 계획 및 신규 추가한 입력란의 계획들을 통합 일괄 확정
 async function confirmProgressPlans(studentId) {
@@ -6132,11 +6622,20 @@ async function approvePlan(planId) {
   }
 }
 
-// 학생 실적 임시 저장 및 교사 확정
+// 학생 실적 임시 저장 및 강사/원장 확정
 async function saveStudentResult(planId, makeConfirmed) {
-  const start = document.getElementById(`realStart_${planId}`).value;
-  const end = document.getElementById(`realEnd_${planId}`).value;
-  const isCompleted = document.getElementById(`realComp_${planId}`).checked;
+  const startEl = document.getElementById(`realStart_${planId}`);
+  const endEl = document.getElementById(`realEnd_${planId}`);
+  const compEl = document.getElementById(`realComp_${planId}`);
+  
+  if (!startEl || !endEl) {
+    alert("시작/종료 시간 입력 요소를 찾을 수 없습니다.");
+    return;
+  }
+  
+  const start = startEl.value;
+  const end = endEl.value;
+  const isCompleted = compEl ? compEl.checked : true;
   
   const plan = state.dailyPlans.find(p => p.id === planId);
   if (!plan) return;
@@ -6145,12 +6644,26 @@ async function saveStudentResult(planId, makeConfirmed) {
   plan.actualEndTime = end;
   plan.isCompleted = isCompleted;
   plan.isConfirmed = makeConfirmed;
-  if (state.currentUser.role === 'student') {
+  
+  const role = state.currentUser.role;
+  if (role === 'student') {
     plan.isStudentSaved = true;
+    plan.isApprovalRequested = true; // 학생 저장 = 승인요청
+  } else if (makeConfirmed) {
+    // 강사/원장이 직접 확정
+    plan.isApprovalRequested = true; // 승인요청 상태로도 표시
   }
   
+  const confirmMsg = makeConfirmed
+    ? (role === 'student' ? "실적을 저장(승인요청) 하시겠습니까?" : "실적을 확정 처리하시겠습니까? (강사/원장 확정)")
+    : "실적을 저장하시겠습니까?";
+  if (!confirm(confirmMsg)) return;
+  
   if (!supabaseClient) {
-    alert(makeConfirmed ? "진도가 완료 확정되었습니다. (오프라인 모드)" : "실적이 저장되었습니다. (오프라인 모드)");
+    const successMsg = makeConfirmed
+      ? (role === 'student' ? "실적이 저장되어 승인 요청되었습니다. (오프라인 모드)" : "실적이 확정 처리되었습니다. (오프라인 모드)")
+      : "실적이 저장되었습니다. (오프라인 모드)";
+    alert(successMsg);
     renderProgress();
     return;
   }
@@ -6162,14 +6675,54 @@ async function saveStudentResult(planId, makeConfirmed) {
       .eq("id", planId);
       
     if (!error) {
-      alert(makeConfirmed ? "진도가 완료 확정되었습니다." : "실적이 저장되었습니다.");
+      const successMsg = makeConfirmed
+        ? (role === 'student' ? "실적이 저장되어 강사/원장님께 승인 요청되었습니다." : "실적이 확정 처리되었습니다. (강사/원장 확정)")
+        : "실적이 저장되었습니다.";
+      alert(successMsg);
       await loadAllData();
       renderProgress();
+    } else {
+      alert("저장 실패");
     }
   } catch (err) {
     console.error(err);
   }
 }
+window.saveStudentResult = saveStudentResult;
+
+// 원장/강사가 실적 확정을 취소 (승인요청/미완료 상태로 환원)
+async function cancelStudentResultConfirm(planId) {
+  const plan = state.dailyPlans.find(p => p.id === planId);
+  if (!plan) return;
+  
+  if (!confirm(`[${plan.activityName}] 항목의 실적 확정을 취소하시겠습니까?\n취소 시 승인 요청(또는 실적 작성) 상태로 환원됩니다.`)) return;
+
+  plan.isConfirmed = false;
+  
+  if (!supabaseClient) {
+    alert("실적 확정이 취소되었습니다. (오프라인 모드)");
+    renderProgress();
+    return;
+  }
+
+  try {
+    const { error } = await supabaseClient
+      .from("agy_daily_plans")
+      .update({ data: plan })
+      .eq("id", planId);
+
+    if (!error) {
+      alert("실적 확정이 취소되었습니다.");
+      await loadAllData();
+      renderProgress();
+    } else {
+      alert("실적 확정 취소 실패");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+window.cancelStudentResultConfirm = cancelStudentResultConfirm;
 
 // --- 신규 일괄 처리 함수 ---
 async function bulkApprovePlans() {
