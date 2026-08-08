@@ -190,7 +190,29 @@ window.mockData = {
     { id: "enr-st-17-2026-07-22", studentId: "st-17", date: "2026-07-22", startTime: "15:30", endTime: "17:00" },
     { id: "enr-st-18-2026-07-22", studentId: "st-18", date: "2026-07-22", startTime: "16:30", endTime: "18:00" },
     { id: "enr-st-19-2026-07-22", studentId: "st-19", date: "2026-07-22", startTime: "17:30", endTime: "19:00" },
-    { id: "enr-st-20-2026-07-22", studentId: "st-20", date: "2026-07-22", startTime: "18:30", endTime: "20:00" }
+    { id: "enr-st-20-2026-07-22", studentId: "st-20", date: "2026-07-22", startTime: "18:30", endTime: "20:00" },
+    
+    // 2026-08-08 (8월 8일 토요일 수강 신청 테스트 데이터)
+    { id: "enr-st-1-2026-08-08", studentId: "st-1", date: "2026-08-08", startTime: "09:00", endTime: "11:00" },
+    { id: "enr-st-2-2026-08-08", studentId: "st-2", date: "2026-08-08", startTime: "09:30", endTime: "11:30" },
+    { id: "enr-st-3-2026-08-08", studentId: "st-3", date: "2026-08-08", startTime: "10:00", endTime: "12:00" },
+    { id: "enr-st-4-2026-08-08", studentId: "st-4", date: "2026-08-08", startTime: "10:30", endTime: "12:30" },
+    { id: "enr-st-5-2026-08-08", studentId: "st-5", date: "2026-08-08", startTime: "11:00", endTime: "13:00" },
+    { id: "enr-st-6-2026-08-08", studentId: "st-6", date: "2026-08-08", startTime: "13:00", endTime: "15:00" },
+    { id: "enr-st-7-2026-08-08", studentId: "st-7", date: "2026-08-08", startTime: "14:00", endTime: "16:00" },
+    { id: "enr-st-8-2026-08-08", studentId: "st-8", date: "2026-08-08", startTime: "15:00", endTime: "17:00" },
+    { id: "enr-st-9-2026-08-08", studentId: "st-9", date: "2026-08-08", startTime: "09:00", endTime: "10:30" },
+    { id: "enr-st-10-2026-08-08", studentId: "st-10", date: "2026-08-08", startTime: "10:30", endTime: "12:00" },
+    { id: "enr-st-11-2026-08-08", studentId: "st-11", date: "2026-08-08", startTime: "13:00", endTime: "14:30" },
+    { id: "enr-st-12-2026-08-08", studentId: "st-12", date: "2026-08-08", startTime: "14:30", endTime: "16:00" },
+    { id: "enr-st-13-2026-08-08", studentId: "st-13", date: "2026-08-08", startTime: "15:30", endTime: "17:30" },
+    { id: "enr-st-14-2026-08-08", studentId: "st-14", date: "2026-08-08", startTime: "16:00", endTime: "18:00" },
+    { id: "enr-st-15-2026-08-08", studentId: "st-15", date: "2026-08-08", startTime: "09:00", endTime: "10:30" },
+    { id: "enr-st-16-2026-08-08", studentId: "st-16", date: "2026-08-08", startTime: "11:00", endTime: "12:30" },
+    { id: "enr-st-17-2026-08-08", studentId: "st-17", date: "2026-08-08", startTime: "13:30", endTime: "15:00" },
+    { id: "enr-st-18-2026-08-08", studentId: "st-18", date: "2026-08-08", startTime: "15:00", endTime: "16:30" },
+    { id: "enr-st-19-2026-08-08", studentId: "st-19", date: "2026-08-08", startTime: "16:30", endTime: "18:00" },
+    { id: "enr-st-20-2026-08-08", studentId: "st-20", date: "2026-08-08", startTime: "17:00", endTime: "19:00" }
   ],
 
   // 8. 출결 기록 테스트 데이터 (20건)

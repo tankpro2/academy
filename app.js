@@ -211,6 +211,30 @@ async function seedDatabaseIfEmpty() {
   }
 }
 
+// 날짜별 학원 가동 운영시간 조회 헬퍼 (DB/설정 미등록 시 토요일은 09:00, 평일은 13:00 기본 적용)
+function getOperatingHoursForDate(dateStr) {
+  if (!dateStr) return { isHoliday: false, start: "13:00", end: "22:00" };
+  const ym = dateStr.substring(0, 7);
+  const monthOps = (state.monthlyOperations && state.monthlyOperations[ym]) || {};
+  if (monthOps[dateStr]) {
+    const op = monthOps[dateStr];
+    const dow = new Date(dateStr).getDay();
+    if (dow === 6 && op.start === "13:00") {
+      return { ...op, start: "09:00" };
+    }
+    return op;
+  }
+  const dow = new Date(dateStr).getDay();
+  if (dow === 0) {
+    return { isHoliday: true, start: "13:00", end: "22:00" };
+  } else if (dow === 6) {
+    return { isHoliday: false, start: "09:00", end: "22:00" };
+  } else {
+    return { isHoliday: false, start: "13:00", end: "22:00" };
+  }
+}
+window.getOperatingHoursForDate = getOperatingHoursForDate;
+
 // 기본 월 운영 시간 세팅 및 DB 저장 헬퍼
 async function saveDefaultMonthlyOperation(yearMonth) {
   const [year, month] = yearMonth.split("-").map(Number);
@@ -224,8 +248,11 @@ async function saveDefaultMonthlyOperation(yearMonth) {
     if (dayOfWeek === 0) {
       // 일요일은 휴무
       configs[dateStr] = { isHoliday: true, start: "13:00", end: "22:00" };
+    } else if (dayOfWeek === 6) {
+      // 토요일: 09:00 ~ 22:00 (학원 운영 시간)
+      configs[dateStr] = { isHoliday: false, start: "09:00", end: "22:00" };
     } else {
-      // 기본 가동시간 평일/토요일: 13:00 ~ 22:00
+      // 평일: 13:00 ~ 22:00
       configs[dateStr] = { isHoliday: false, start: "13:00", end: "22:00" };
     }
   }
@@ -294,7 +321,15 @@ async function loadAllData() {
     state.teachers = loadedTeachers.filter(t => t && t.id && !deletedTcIds.includes(t.id));
     state.teacherSchedules = (resSchedules.data || []).map(r => r.data);
     state.teacherWorkLogs = (resWorklogs.data || []).map(r => r.data);
-    state.enrollments = (resEnrollments.data || []).map(r => r.data);
+    
+    const dbEnrs = (resEnrollments.data || []).map(r => r.data).filter(Boolean);
+    const mockEnrs = (window.mockData.enrollments || []).map(r => r.data || r).filter(Boolean);
+    const enrMap = new Map();
+    [...mockEnrs, ...dbEnrs].forEach(e => {
+      if (e && e.id) enrMap.set(e.id, e);
+    });
+    state.enrollments = Array.from(enrMap.values());
+
     state.attendance = (resAttendance.data || []).map(r => r.data);
     state.dailyPlans = (resDailyPlans.data || []).map(r => r.data);
     
@@ -3739,27 +3774,50 @@ function getGradeGroup(gradeStr) {
 
 function renderGridTimetable() {
   const target = document.getElementById("timetableGridTarget");
+  if (!target) return;
   
-  // 세로 시간 축 범위 생성 (30분 간격, 학원 운영 기준 13:00 ~ 22:00)
-  const startHour = 13;
-  const endHour = 22;
-  const timeSlots = [];
-  
-  for (let h = startHour; h < endHour; h++) {
-    timeSlots.push(`${String(h).padStart(2, "0")}:00`);
-    timeSlots.push(`${String(h).padStart(2, "0")}:30`);
-  }
-  timeSlots.push("22:00");
-  
-  // 가로 학년군 그룹
-  const gradeGroups = ["초등저학년", "초등고학년", "중등", "고등"];
-  
-  // 데이터 선별
-  const targetDate = state.selectedDate;
+  const targetDate = state.selectedDate || new Date().toISOString().split("T")[0];
   const enrollsToday = state.enrollments.filter(e => e.date === targetDate);
-  
+  const gradeGroups = ["초등저학년", "초등고학년", "중등", "고등"];
+
   if (scheduleViewMode === "daily") {
     // --- 일별 그리드 렌더링 ---
+    const op = getOperatingHoursForDate(targetDate);
+    
+    // 기본 운영시간 시작/종료 시각 결정
+    let startHour = 13;
+    let endHour = 22;
+    if (op && op.start) {
+      startHour = parseInt(op.start.split(":")[0], 10);
+    } else {
+      const dow = new Date(targetDate).getDay();
+      if (dow === 6) startHour = 9;
+    }
+    if (op && op.end) {
+      endHour = parseInt(op.end.split(":")[0], 10);
+    }
+    
+    // 해당 날짜의 수강 신청 데이터에 맞게 시작/종료 시간 범위 자동 조절
+    enrollsToday.forEach(enr => {
+      if (enr.startTime) {
+        const sh = parseInt(enr.startTime.split(":")[0], 10);
+        if (sh < startHour) startHour = sh;
+      }
+      if (enr.endTime) {
+        const parts = enr.endTime.split(":");
+        let eh = parseInt(parts[0], 10);
+        if (parseInt(parts[1], 10) > 0) eh += 1;
+        if (eh > endHour) endHour = eh;
+      }
+    });
+
+    const timeSlots = [];
+    for (let h = startHour; h < endHour; h++) {
+      timeSlots.push(`${String(h).padStart(2, "0")}:00`);
+      timeSlots.push(`${String(h).padStart(2, "0")}:30`);
+    }
+    timeSlots.push(`${String(endHour).padStart(2, "0")}:00`);
+
     let tableHTML = `
       <div class="timetable-grid-container">
         <table class="timetable-grid-table">
@@ -3775,24 +3833,19 @@ function renderGridTimetable() {
           <tbody>
     `;
     
-    // 각 시간 슬롯별 행 생성
     for (let t = 0; t < timeSlots.length - 1; t++) {
       const slotStart = timeSlots[t];
       const slotEnd = timeSlots[t + 1];
       
       tableHTML += `<tr><td class="timetable-time-col">${slotStart} ~ ${slotEnd}</td>`;
       
-      // 학년군별 컬럼 데이터 매핑
       gradeGroups.forEach(grp => {
-        // 해당 날짜, 해당 학년군에 해당하는 학생 중 이 30분 슬롯 시간대에 걸쳐 수강하는 학생 추출
         const matchingStudents = enrollsToday.filter(enr => {
           const st = state.students.find(s => s.id === enr.studentId);
           if (!st) return false;
-          
           const stGrp = getGradeGroup(st.grade);
           if (stGrp !== grp) return false;
           
-          // 겹침 검증: [startTime, endTime] 이 [slotStart, slotEnd] 와 겹치는지 체크
           return (enr.startTime < slotEnd && enr.endTime > slotStart);
         });
         
@@ -3820,10 +3873,9 @@ function renderGridTimetable() {
     
   } else {
     // --- 주간 그리드 렌더링 ---
-    // 선택된 일자의 월~토(일주간)를 탐색
-    const current = new Date(state.selectedDate);
+    const current = new Date(targetDate);
     const day = current.getDay();
-    const distanceToMon = day === 0 ? -6 : 1 - day; // 월요일 기준 계산
+    const distanceToMon = day === 0 ? -6 : 1 - day;
     const monday = new Date(current.setDate(current.getDate() + distanceToMon));
     
     const weekdays = [];
@@ -3833,6 +3885,41 @@ function renderGridTimetable() {
       d.setDate(monday.getDate() + i);
       weekdays.push(d.toISOString().split("T")[0]);
     }
+    
+    let startHour = 13;
+    let endHour = 22;
+    
+    weekdays.forEach(dStr => {
+      const op = getOperatingHoursForDate(dStr);
+      if (op && op.start) {
+        const sh = parseInt(op.start.split(":")[0], 10);
+        if (sh < startHour) startHour = sh;
+      }
+      if (op && op.end) {
+        const eh = parseInt(op.end.split(":")[0], 10);
+        if (eh > endHour) endHour = eh;
+      }
+      const dayEnrs = state.enrollments.filter(e => e.date === dStr);
+      dayEnrs.forEach(enr => {
+        if (enr.startTime) {
+          const sh = parseInt(enr.startTime.split(":")[0], 10);
+          if (sh < startHour) startHour = sh;
+        }
+        if (enr.endTime) {
+          const parts = enr.endTime.split(":");
+          let eh = parseInt(parts[0], 10);
+          if (parseInt(parts[1], 10) > 0) eh += 1;
+          if (eh > endHour) endHour = eh;
+        }
+      });
+    });
+    
+    const timeSlots = [];
+    for (let h = startHour; h < endHour; h++) {
+      timeSlots.push(`${String(h).padStart(2, "0")}:00`);
+      timeSlots.push(`${String(h).padStart(2, "0")}:30`);
+    }
+    timeSlots.push(`${String(endHour).padStart(2, "0")}:00`);
     
     let tableHTML = `
       <div class="timetable-grid-container">
@@ -3852,7 +3939,6 @@ function renderGridTimetable() {
       
       tableHTML += `<tr><td class="timetable-time-col">${slotStart} ~ ${slotEnd}</td>`;
       
-      // 요일별 컬럼
       weekdays.forEach(date => {
         const enrollsThisDay = state.enrollments.filter(e => e.date === date);
         const matching = enrollsThisDay.filter(enr => {
