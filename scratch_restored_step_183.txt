@@ -1,0 +1,373 @@
+with open('c:/academy/app.js', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+start_marker = "  container.innerHTML = `"
+start_idx = content.find(start_marker)
+
+# Find where renderEnrollments ends: before function makeTimeOptions
+end_marker = "function makeTimeOptions(selectedVal, minTime = \"00:00\", maxTime = \"24:00\") {"
+end_idx = content.find(end_marker)
+
+if start_idx == -1 or end_idx == -1:
+    print(f"ERROR: Markers not found! start_idx={start_idx}, end_idx={end_idx}")
+    exit(1)
+
+clean_enrollments_code = """  // --- 세로형 일자별 출석/진도표 & 요약 대시보드 데이터 계산 ---
+  const [verYear, verMonth] = opsYearMonth.split("-").map(Number);
+  const verDaysInMonth = new Date(verYear, verMonth, 0).getDate();
+  const verMonthOps = state.monthlyOperations[opsYearMonth] || {};
+
+  let verTotalPlannedMins = 0;
+  let verTotalActualMins = 0;
+  let verPlannedDaysCount = 0;
+  let verAttendedDaysCount = 0;
+  let verAbsentDaysCount = 0;
+
+  const verDayRows = [];
+  const studentId = enrollSelectedStudentId;
+
+  for (let d = 1; d <= verDaysInMonth; d++) {
+    const dateStr = `${opsYearMonth}-${String(d).padStart(2, "0")}`;
+    const dateObj = new Date(verYear, verMonth - 1, d);
+    const dayOfWeek = dateObj.getDay();
+    const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+    const dayName = dayNames[dayOfWeek];
+
+    const isSunday = dayOfWeek === 0;
+    const isSaturday = dayOfWeek === 6;
+    const dayColor = isSunday ? "var(--accent-red)" : (isSaturday ? "#2563eb" : "var(--text-dark)");
+
+    const op = verMonthOps[dateStr];
+    const isHoliday = op && op.isHoliday;
+
+    const plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === dateStr);
+    const enrollsToday = state.enrollments.filter(e => e.studentId === studentId && e.date === dateStr);
+
+    // 1. 계획 시간 계산
+    let dayPlannedMins = 0;
+    let plannedTextList = [];
+
+    if (plansToday.length > 0) {
+      plansToday.forEach(p => {
+        const mins = p.plannedDuration || calculateMinutes(p.plannedStartTime, p.plannedEndTime);
+        dayPlannedMins += mins;
+        plannedTextList.push(`${escapeHTML(p.activityName)} (${p.plannedStartTime}~${p.plannedEndTime})`);
+      });
+    } else if (enrollsToday.length > 0) {
+      enrollsToday.forEach(e => {
+        const mins = calculateMinutes(e.startTime, e.endTime);
+        dayPlannedMins += mins;
+        plannedTextList.push(`수강 (${e.startTime}~${e.endTime})`);
+      });
+    }
+
+    // 2. 실제 실적 시간 계산
+    let dayActualMins = 0;
+    let actualTextList = [];
+    const completedPlansToday = plansToday.filter(p => p.isCompleted || p.isConfirmed || (p.actualStartTime && p.actualEndTime));
+
+    if (completedPlansToday.length > 0) {
+      completedPlansToday.forEach(p => {
+        const start = p.actualStartTime || p.plannedStartTime;
+        const end = p.actualEndTime || p.plannedEndTime;
+        const mins = calculateMinutes(start, end);
+        dayActualMins += mins;
+        actualTextList.push(`${escapeHTML(p.activityName)} (${start}~${end})`);
+      });
+    }
+
+    // 3. 월간 요약 누적
+    verTotalPlannedMins += dayPlannedMins;
+    verTotalActualMins += dayActualMins;
+
+    if (dayPlannedMins > 0 || plansToday.length > 0 || enrollsToday.length > 0) {
+      verPlannedDaysCount++;
+      if (completedPlansToday.length > 0) {
+        verAttendedDaysCount++;
+      } else if (!isHoliday) {
+        verAbsentDaysCount++;
+      }
+    }
+
+    // 4. 과부족 (분 단위)
+    let diffBadgeHTML = "-";
+    if (dayPlannedMins > 0 && dayActualMins > 0) {
+      const diff = dayActualMins - dayPlannedMins;
+      if (diff > 0) {
+        diffBadgeHTML = `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; font-weight:800;">⚡ ${formatMinutes(diff)} 초과</span>`;
+      } else if (diff < 0) {
+        diffBadgeHTML = `<span class="badge" style="background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; font-weight:800;">⏰ ${formatMinutes(Math.abs(diff))} 부족</span>`;
+      } else {
+        diffBadgeHTML = `<span class="badge" style="background:#f3f4f6; color:#374151; font-weight:700;">✅ 정시 이행 (0분)</span>`;
+      }
+    } else if (dayPlannedMins > 0 && dayActualMins === 0) {
+      diffBadgeHTML = `<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca; font-weight:800;">⏰ ${formatMinutes(dayPlannedMins)} 부족</span>`;
+    }
+
+    // 5. 출석 상태 (계획은 있으나 실적이 없으면 결석)
+    let statusBadgeHTML = `<span style="color:var(--text-muted); font-size:12px;">-</span>`;
+    if (isHoliday) {
+      statusBadgeHTML = `<span class="badge" style="background:#fee2e2; color:#dc2626; border:1px solid #fecaca;">🚫 학원 휴원</span>`;
+    } else if (dayPlannedMins > 0 || plansToday.length > 0 || enrollsToday.length > 0) {
+      if (completedPlansToday.length > 0) {
+        statusBadgeHTML = `<span class="badge badge-emerald" style="font-size:12px; font-weight:800;">🟢 출석</span>`;
+      } else {
+        statusBadgeHTML = `<span class="badge" style="background:#fee2e2; color:#dc2626; border:1px solid #fecaca; font-size:12px; font-weight:800;">🔴 결석</span>`;
+      }
+    }
+
+    const plannedCell = plannedTextList.length > 0
+      ? `<div><strong style="color:var(--text-dark);">${plannedTextList.join(', ')}</strong> <span style="font-size:11px; color:#2563eb; font-weight:700;">(${formatMinutes(dayPlannedMins)})</span></div>`
+      : `<span style="color:var(--text-muted);">-</span>`;
+
+    const actualCell = actualTextList.length > 0
+      ? `<div><strong style="color:#059669;">${actualTextList.join(', ')}</strong> <span style="font-size:11px; color:#059669; font-weight:700;">(${formatMinutes(dayActualMins)})</span></div>`
+      : `<span style="color:var(--text-muted);">-</span>`;
+
+    verDayRows.push(`
+      <tr style="border-bottom:1px solid var(--border-color); ${isHoliday ? 'background:#fff8f8;' : ''}">
+        <td style="padding:10px 12px; font-weight:800; font-size:13px; color:${dayColor}; text-align:center;">
+          ${String(d).padStart(2, '0')}일 (${dayName})
+        </td>
+        <td style="padding:10px 12px; text-align:center;">
+          ${statusBadgeHTML}
+        </td>
+        <td style="padding:10px 12px; font-size:13px;">
+          ${plannedCell}
+        </td>
+        <td style="padding:10px 12px; font-size:13px;">
+          ${actualCell}
+        </td>
+        <td style="padding:10px 12px; text-align:center;">
+          ${diffBadgeHTML}
+        </td>
+      </tr>
+    `);
+  }
+
+  const verTotalDiffMins = verTotalActualMins - verTotalPlannedMins;
+
+  const summaryCardsHTML = `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
+      <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:14px; text-align:center; box-shadow:var(--shadow-sm);">
+        <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">⏱️ 월간 총 계획 시간</div>
+        <div style="font-size:20px; font-weight:900; color:var(--text-dark);">${formatMinutes(verTotalPlannedMins)}</div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">총 ${verTotalPlannedMins}분 계획</div>
+      </div>
+
+      <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:14px; text-align:center; box-shadow:var(--shadow-sm);">
+        <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">🎯 월간 총 실제 시간</div>
+        <div style="font-size:20px; font-weight:900; color:#2563eb;">${formatMinutes(verTotalActualMins)}</div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">총 ${verTotalActualMins}분 실제 이행</div>
+      </div>
+
+      <div style="background:${verTotalDiffMins < 0 ? '#fff7ed' : (verTotalDiffMins > 0 ? '#f0f9ff' : 'var(--bg-app)')}; border:1px solid ${verTotalDiffMins < 0 ? '#fed7aa' : (verTotalDiffMins > 0 ? '#bae6fd' : 'var(--border-color)')}; border-radius:var(--radius-md); padding:14px; text-align:center; box-shadow:var(--shadow-sm);">
+        <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">⚖️ 월간 과부족 (차이)</div>
+        <div style="font-size:20px; font-weight:900; color:${verTotalDiffMins < 0 ? '#c2410c' : (verTotalDiffMins > 0 ? '#0369a1' : 'var(--text-dark)')};">
+          ${verTotalDiffMins < 0 ? `${formatMinutes(Math.abs(verTotalDiffMins))} 부족` : (verTotalDiffMins > 0 ? `${formatMinutes(verTotalDiffMins)} 초과` : '정시 이행')}
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${verTotalDiffMins < 0 ? '계획 대비 미달' : (verTotalDiffMins > 0 ? '계획 초과 이행' : '계획 정시 달성')}</div>
+      </div>
+
+      <div style="background:var(--bg-app); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:14px; text-align:center; box-shadow:var(--shadow-sm);">
+        <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">📊 출석 현황 요약</div>
+        <div style="font-size:18px; font-weight:900; color:#059669;">
+          출석 <span style="color:#059669;">${verAttendedDaysCount}</span>일 / 결석 <span style="color:#dc2626;">${verAbsentDaysCount}</span>일
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">총 등원 계획 ${verPlannedDaysCount}일 기준</div>
+      </div>
+    </div>
+  `;
+
+  let mainScheduleHTML = "";
+  if (enrollViewMode === "vertical") {
+    mainScheduleHTML = `
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+          <div class="card-title" style="margin-bottom:0;">📋 ${opsYearMonth.replace("-","년 ")}월 세로형 일자별 출석 및 시간표 (1일 ~ 말일)</div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn btn-emerald" onclick="toggleEnrollViewMode('vertical')" style="font-size:12px; font-weight:700;">📋 세로형 일자별 보기</button>
+            <button class="btn btn-secondary" onclick="toggleEnrollViewMode('calendar')" style="font-size:12px; font-weight:700;">🗓 월간 캘린더 보기</button>
+          </div>
+        </div>
+
+        ${summaryCardsHTML}
+
+        <div style="overflow-x:auto;">
+          <table class="table" style="width:100%; border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--bg-app); border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-muted);">
+                <th style="padding:10px 12px; width:100px; text-align:center;">날짜 / 요일</th>
+                <th style="padding:10px 12px; width:110px; text-align:center;">출석 상태</th>
+                <th style="padding:10px 12px;">출석 계획 시간</th>
+                <th style="padding:10px 12px;">출석 실제 시간</th>
+                <th style="padding:10px 12px; width:140px; text-align:center;">과부족 차이 (분)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${verDayRows.join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } else {
+    mainScheduleHTML = `
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+          <div class="card-title" style="margin-bottom:0;">🗓 ${opsYearMonth.replace("-","년 ")}월 수강 캘린더</div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn btn-secondary" onclick="toggleEnrollViewMode('vertical')" style="font-size:12px; font-weight:700;">📋 세로형 일자별 보기</button>
+            <button class="btn btn-emerald" onclick="toggleEnrollViewMode('calendar')" style="font-size:12px; font-weight:700;">🗓 월간 캘린더 보기</button>
+          </div>
+        </div>
+
+        ${summaryCardsHTML}
+
+        <div class="calendar-grid">
+          <div class="calendar-day-label" style="color:var(--accent-red);">일</div>
+          <div class="calendar-day-label">월</div>
+          <div class="calendar-day-label">화</div>
+          <div class="calendar-day-label">수</div>
+          <div class="calendar-day-label">목</div>
+          <div class="calendar-day-label">금</div>
+          <div class="calendar-day-label" style="color:#3b82f6;">토</div>
+          ${cellsHTML}
+        </div>
+
+        <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <span style="font-size:12px; color:var(--text-muted);">
+            💡 날짜를 클릭하면 수강 일정을 등록하거나 삭제할 수 있습니다. (🚫 표시된 날은 학원 휴원일입니다)
+          </span>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button onclick="openSelectDeleteEnrollmentsModal()"
+              style="display:flex; align-items:center; gap:6px; padding:7px 14px; background:#fff; border:2px solid var(--accent-gold); color:#92400e; border-radius:8px; font-weight:800; font-size:12px; cursor:pointer;">
+              ☑️ 선택 삭제
+            </button>
+            <button onclick="clearMonthEnrollments()"
+              style="display:flex; align-items:center; gap:6px; padding:7px 14px; background:#fff; border:2px solid #ef4444; color:#ef4444; border-radius:8px; font-weight:800; font-size:12px; cursor:pointer;">
+              🗑 이번달 전체 삭제
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>수강 및 출석 관리</h1>
+        <p>${opsYearMonth.replace("-","년 ")}월 학생별 출석 현황, 계획 시간 대비 실제 시간 과부족을 통합 관리합니다.</p>
+      </div>
+      <div class="action-bar" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        ${state.currentUser.role === 'director' ? `
+          <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+            <span style="font-size:12px; font-weight:700;">수강신청 허용 (해당 월 전체 학생):</span>
+            <input type="checkbox" id="allowOpsEnrollmentToggle" onchange="toggleMonthlyEnrollmentAccess(this.checked)" style="width:18px; height:18px; cursor:pointer;" ${monthData.allowEnrollment ? 'checked' : ''}>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; background:var(--bg-card); padding:8px 12px; border:1px solid var(--border-color); border-radius:var(--radius-md);">
+            <span style="font-size:12px; font-weight:700; color:var(--text-dark);">👤 개별 학생 수강 통제:</span>
+            <select id="opsIndividualStudentSelector" onchange="onOpsStudentControlChange(this.value)" style="padding:4px 8px; border-radius:var(--radius-sm); border:1px solid var(--border-color); font-size:12px; font-weight:700; cursor:pointer;">
+              ${opsStudentOptions}
+            </select>
+            <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:700; cursor:pointer; margin-left:4px;">
+              <input type="checkbox" id="opsIndividualStudentToggle" onchange="toggleIndividualStudentAccess(this.checked)" style="width:16px; height:16px; cursor:pointer;" ${isIndividualAllowed ? 'checked' : ''}>
+              <span>수강 허용</span>
+            </label>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+
+    <!-- 학생 / 월 선택 바 -->
+    <div class="card" style="padding:16px; margin-bottom:16px;">
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        ${!isStudent ? `
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:700; font-size:13px;">학생 선택:</span>
+            <select id="enrollStSelector" onchange="changeEnrollStudent(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+              ${studentOptions}
+            </select>
+          </div>
+        ` : ''}
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-weight:700; font-size:13px;">조회 월:</span>
+          <select id="enrollMonthSelector" onchange="changeOpsMonth(this.value)" style="padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+            <option value="2026-07" ${opsYearMonth === '2026-07' ? 'selected' : ''}>2026년 7월</option>
+            <option value="2026-08" ${opsYearMonth === '2026-08' ? 'selected' : ''}>2026년 8월</option>
+            <option value="2026-09" ${opsYearMonth === '2026-09' ? 'selected' : ''}>2026년 9월</option>
+            <option value="2026-10" ${opsYearMonth === '2026-10' ? 'selected' : ''}>2026년 10월</option>
+            <option value="2026-11" ${opsYearMonth === '2026-11' ? 'selected' : ''}>2026년 11월</option>
+            <option value="2026-12" ${opsYearMonth === '2026-12' ? 'selected' : ''}>2026년 12월</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 시간표 작성 방법 선택 카드 2개 -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+      <!-- 방법 1: 주간 시간표 직접 작성 -->
+      <div class="card" style="border:2px solid var(--primary-color); background:linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); cursor:pointer;"
+           onclick="openWeeklyScheduleModal()">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+          <div style="width:44px; height:44px; background:var(--primary-color); border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:22px;">📋</div>
+          <div>
+            <div style="font-size:15px; font-weight:800; color:var(--primary-color);">시간표 직접 작성</div>
+            <div style="font-size:11px; color:var(--text-muted);">주간 일정 입력 후 월간 반복 적용</div>
+          </div>
+        </div>
+        <p style="font-size:12px; color:#0369a1; margin:0; line-height:1.6;">
+          ① 요일별 수강 시간 입력<br>
+          ② <b>주차별 반복 적용</b> 버튼으로 한 번에 월간 반영
+        </p>
+        <div style="margin-top:12px;">
+          <span style="display:inline-block; background:var(--primary-color); color:white; font-size:12px; font-weight:700; padding:6px 16px; border-radius:99px;">
+            ✏️ 시간표 작성하기 →
+          </span>
+        </div>
+      </div>
+
+      <!-- 방법 2: 손글씨 스캔 / AI 인식 -->
+      <div class="card" style="border:2px solid var(--accent-gold); background:linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); cursor:pointer;"
+           onclick="openScanUploadModal()">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+          <div style="width:44px; height:44px; background:var(--accent-gold); border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:22px;">📷</div>
+          <div>
+            <div style="font-size:15px; font-weight:800; color:#92400e;">스캔본 AI 자동 인식</div>
+            <div style="font-size:11px; color:var(--text-muted);">손글씨 캘린더 첨부 → AI 자동 반영 (무료)</div>
+          </div>
+        </div>
+        <p style="font-size:12px; color:#92400e; margin:0; line-height:1.6;">
+          ① 손글씨 월간 계획표 사진 첨부<br>
+          ② AI가 자동으로 일정 인식하여 캘린더 반영
+        </p>
+        <div style="margin-top:12px;">
+          <span style="display:inline-block; background:var(--accent-gold); color:#7c2d12; font-size:12px; font-weight:700; padding:6px 16px; border-radius:99px;">
+            🤖 AI 인식으로 등록 →
+          </span>
+        </div>
+      </div>
+    </div>
+
+    ${mainScheduleHTML}
+  `;
+
+  if (window.lucide) window.lucide.createIcons();
+
+  if (state.currentUser.role === 'director') {
+    const targetStudent = state.students.find(s => s.id === enrollSelectedStudentId);
+    if (targetStudent) {
+      const toggle = document.getElementById("allowEditToggle");
+      if (toggle) toggle.checked = !!targetStudent.isEditAllowed;
+    }
+  }
+}
+"""
+
+new_content = content[:container_start_idx] + clean_enrollments_code
+
+with open('c:/academy/app.js', 'w', encoding='utf-8') as f:
+    f.write(new_content)
+
+print("SUCCESS: renderEnrollments clean rewrite finished!")

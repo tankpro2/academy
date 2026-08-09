@@ -889,8 +889,10 @@ table.yuju-table tr:hover td {
   .no-print, .sidebar, .role-switcher-bar, .action-bar, .page-header, .page-title, .btn, .tabs-navigation {
     display: none !important;
   }
-  .app-container, .main-content {
-    display: block !important;
+  .app-container, .main-content, #mainContent, #progressTabContent {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 !important;
     height: 100% !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -901,7 +903,8 @@ table.yuju-table tr:hover td {
     box-shadow: none !important;
     padding: 0 !important;
     margin: 0 !important;
-    height: 97vh !important;
+    flex: 1 !important;
+    height: 100% !important;
     display: flex !important;
     flex-direction: column !important;
     box-sizing: border-box !important;
@@ -949,14 +952,31 @@ table.yuju-table tr:hover td {
       to bottom,
       transparent,
       transparent 27px,
-      #64748b 27px,
-      #64748b 28px
+      #94a3b8 27px,
+      #94a3b8 28px
     ) !important;
+    min-height: 280px !important;
   }
   .notebook-line {
     height: 28px !important;
-    border-bottom: 1px solid #64748b !important;
+    border-bottom: 1px solid #94a3b8 !important;
     width: 100% !important;
+  }
+  .plan-row-item {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+    margin-bottom: 5px !important;
+    align-items: center !important;
+    width: 100% !important;
+  }
+  .plan-row-item input, .plan-row-item select {
+    font-size: 11px !important;
+    padding: 2px 4px !important;
+    height: 24px !important;
+    border: 1px solid #64748b !important;
+    background: transparent !important;
+    color: #000 !important;
   }
   input, select {
     border: 1px solid #64748b !important;
