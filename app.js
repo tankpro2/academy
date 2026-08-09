@@ -5861,8 +5861,8 @@ function renderMobileLandingScreen() {
             <span class="brand-sub">국어 & 진로진학 명품 학원</span>
           </div>
         </div>
-        <button class="btn-pc-toggle" onclick="goToPCSystem()">
-          <i data-lucide="monitor"></i> PC 화면으로 보기
+        <button class="btn-pc-toggle" onclick="openPCHomepage()">
+          <i data-lucide="monitor"></i> PC 홈페이지 보기
         </button>
       </nav>
 
@@ -5906,8 +5906,8 @@ function renderMobileLandingScreen() {
             </div>
           </div>
 
-          <button onclick="goToPCSystem()" style="width:100%; margin-top:16px; padding:12px; border:none; border-radius:30px; background:var(--accent-gold); color:#3d1a00; font-weight:800; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
-            <i data-lucide="monitor"></i> 💻 PC 화면으로 보기 (학원 관리 시스템)
+          <button onclick="openPCHomepage()" style="width:100%; margin-top:16px; padding:12px; border:none; border-radius:30px; background:var(--accent-gold); color:#3d1a00; font-weight:800; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+            <i data-lucide="monitor"></i> 💻 PC 화면 홈페이지 보기
           </button>
         </div>
 
@@ -5962,13 +5962,13 @@ function renderMobileLandingScreen() {
         <!-- 3. 하단 학원관리 시스템 입장 배너 -->
         <div class="mobile-card" style="background:linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color:white; text-align:center; padding:20px;">
           <div style="font-weight:800; font-size:15px; margin-bottom:6px; color:#fcd34d; display:flex; align-items:center; justify-content:center; gap:6px;">
-            <i data-lucide="lock"></i> 학원통합관리시스템 (원장/강사/학생)
+            <i data-lucide="monitor"></i> PC 버전 학원 소개 홈페이지
           </div>
           <p style="font-size:12px; color:#94a3b8; margin-bottom:14px; line-height:1.5;">
-            학생 출결, 당일 학습 진도 계획, 강사 일지 및 수강 관리를 위해 PC 화면 모드로 전환하여 로그인하세요.
+            데스크톱 PC 화면 환경에 맞춰 제작된 상아탑 학원 소개 전체 화면으로 이동합니다.
           </p>
-          <button onclick="goToPCSystem()" style="width:100%; padding:12px; border:none; border-radius:25px; background:var(--primary-color); color:white; font-weight:800; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
-            <i data-lucide="monitor"></i> PC 화면으로 보기 & 로그인
+          <button onclick="openPCHomepage()" style="width:100%; padding:12px; border:none; border-radius:25px; background:var(--primary-color); color:white; font-weight:800; font-size:13.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+            <i data-lucide="monitor"></i> PC 홈페이지 화면으로 이동
           </button>
         </div>
       </div>
@@ -5988,7 +5988,18 @@ function bindConsultButtons(root) {
 }
 window.bindConsultButtons = bindConsultButtons;
 
-function goToPCSystem() {
+function openPCHomepage() {
+  document.getElementById("loginScreen").style.display = "none";
+  document.getElementById("appScreen").style.display = "none";
+  const screen = document.getElementById("publicHomepageScreen");
+  screen.style.display = "block";
+  screen.innerHTML = getHomepageHTML(true);
+  if (window.lucide) window.lucide.createIcons();
+  bindConsultButtons(screen);
+}
+window.openPCHomepage = openPCHomepage;
+
+function openLoginScreen() {
   document.getElementById("publicHomepageScreen").style.display = "none";
   document.getElementById("appScreen").style.display = "none";
   document.getElementById("loginScreen").style.display = "flex";
@@ -6000,10 +6011,11 @@ function goToPCSystem() {
     if (userEl) userEl.value = state.currentUser.username;
   }
 }
-window.goToPCSystem = goToPCSystem;
+window.openLoginScreen = openLoginScreen;
+window.goToPCSystem = openLoginScreen;
 
 function closePublicHomepage() {
-  goToPCSystem();
+  openLoginScreen();
 }
 window.closePublicHomepage = closePublicHomepage;
 
@@ -6070,8 +6082,11 @@ function getHomepageHTML(isPublic) {
         </div>
 
         <div style="display:flex; gap:8px; align-items:center;">
-          <button class="btn btn-emerald" onclick="goToPCSystem()" style="display: flex; align-items: center; gap: 6px; font-weight:700; background-color: var(--primary-color); color: white; border:none; padding:9px 18px; border-radius:30px; cursor:pointer; font-size:13px; box-shadow: var(--shadow-sm);">
-            <i data-lucide="monitor"></i> 💻 PC 화면으로 보기 (학원 관리 시스템)
+          <button class="btn btn-secondary" onclick="openPublicHomepage()" style="display:flex; align-items:center; gap:6px; font-weight:700; background-color:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:9px 16px; border-radius:30px; cursor:pointer; font-size:12.5px;">
+            <i data-lucide="smartphone"></i> 📱 모바일 화면으로 보기
+          </button>
+          <button class="btn btn-emerald" onclick="openLoginScreen()" style="display: flex; align-items: center; gap: 6px; font-weight:700; background-color: var(--primary-color); color: white; border:none; padding:9px 18px; border-radius:30px; cursor:pointer; font-size:13px; box-shadow: var(--shadow-sm);">
+            <i data-lucide="lock"></i> 🔒 학원관리시스템 (로그인)
           </button>
         </div>
       </nav>
@@ -6091,8 +6106,8 @@ function getHomepageHTML(isPublic) {
             단순 주입식 교육을 넘어 학생의 문해력을 과학적으로 트레이닝하고,<br>수시 학생부 관리와 심층 상담을 통해 최적의 합격 전략을 설계합니다.
           </p>
           <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
-            <button class="btn btn-emerald" onclick="goToPCSystem()" style="background: var(--accent-gold); color: #3d1a00; font-weight:bold; border: none; border-radius:30px; padding:10px 20px; font-size:13.5px; cursor:pointer; display:flex; align-items:center; gap:6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-              <i data-lucide="monitor"></i> 💻 PC 화면으로 보기 (학원 관리 시스템)
+            <button class="btn btn-emerald" onclick="openLoginScreen()" style="background: var(--accent-gold); color: #3d1a00; font-weight:bold; border: none; border-radius:30px; padding:10px 20px; font-size:13.5px; cursor:pointer; display:flex; align-items:center; gap:6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+              <i data-lucide="lock"></i> 🔒 학원관리시스템 바로가기 (로그인)
             </button>
             <button class="btn btn-secondary" onclick="document.getElementById('programs').scrollIntoView({behavior: 'smooth'})" style="background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.4); border-radius:30px; padding:9px 18px; font-size:13px; cursor:pointer;">
               프로그램 둘러보기
