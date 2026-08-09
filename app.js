@@ -21,7 +21,9 @@ let state = {
   monthlyOperations: {},      // 월별 학원 가동 정보 (키: 'YYYY-MM', 값: { 'YYYY-MM-DD': { isHoliday, isClosed, start, end } })
   
   // 시뮬레이션 기준 날짜
-  selectedDate: new Date().toISOString().split("T")[0]
+  selectedDate: new Date().toISOString().split("T")[0],
+  progressStartDate: "",
+  progressEndDate: ""
 };
 
 // 오프라인 로컬 모크 데이터 로딩 헬퍼
@@ -3979,7 +3981,37 @@ function getThisMonthRange() {
   const lastDay = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDayObj.getDate()).padStart(2, '0')}`;
   return { start: firstDay, end: lastDay };
 }
- // 원장/강사가 진도관리에서 선택한 학생 유지용 변수
+
+function changeProgressDateRange(start, end) {
+  state.progressStartDate = start || "";
+  state.progressEndDate = end || "";
+  renderProgress();
+}
+window.changeProgressDateRange = changeProgressDateRange;
+
+function setQuickProgressRange(type) {
+  const now = new Date();
+  if (type === 'thisMonth') {
+    const range = getThisMonthRange();
+    state.progressStartDate = range.start;
+    state.progressEndDate = range.end;
+  } else if (type === 'thisWeek') {
+    const day = now.getDay();
+    const diffToMon = now.getDate() - day + (day === 0 ? -6 : 1);
+    const mon = new Date(now.setDate(diffToMon));
+    const sun = new Date(mon);
+    sun.setDate(mon.getDate() + 6);
+
+    const monStr = mon.toISOString().split("T")[0];
+    const sunStr = sun.toISOString().split("T")[0];
+    state.progressStartDate = monStr;
+    state.progressEndDate = sunStr;
+  }
+  renderProgress();
+}
+window.setQuickProgressRange = setQuickProgressRange;
+
+// 원장/강사가 진도관리에서 선택한 학생 유지용 변수
 
 // --- 진도 계획 카테고리 (대분류/중분류) 정의 및 선택 헬퍼 ---
 const PROGRESS_CATEGORIES = {
@@ -4544,16 +4576,19 @@ function renderProgressTabContent(studentId) {
 
   if (progressTab === "stats") {
     // --- 3. 누적 진도 관리 탭 (1일 ~ 말일 누적 진도 이력 조회) ---
-    if (!progressStartDate || !progressEndDate) {
+    if (!state.progressStartDate || !state.progressEndDate) {
       const monthRange = getThisMonthRange();
-      progressStartDate = monthRange.start;
-      progressEndDate = monthRange.end;
+      state.progressStartDate = monthRange.start;
+      state.progressEndDate = monthRange.end;
     }
+
+    const startVal = state.progressStartDate;
+    const endVal = state.progressEndDate;
 
     const filteredPlans = state.dailyPlans.filter(p => {
       if (p.studentId !== studentId) return false;
-      if (progressStartDate && p.date < progressStartDate) return false;
-      if (progressEndDate && p.date > progressEndDate) return false;
+      if (startVal && p.date < startVal) return false;
+      if (endVal && p.date > endVal) return false;
       return true;
     }).sort((a, b) => b.date.localeCompare(a.date));
 
@@ -4598,9 +4633,9 @@ function renderProgressTabContent(studentId) {
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;" class="no-print">
             <button class="btn btn-secondary" onclick="setQuickProgressRange('thisMonth')" style="font-size:12px; font-weight:700;">📅 이번달(1일~말일)</button>
             <button class="btn btn-secondary" onclick="setQuickProgressRange('thisWeek')" style="font-size:12px; font-weight:700;">🗓️ 이번주</button>
-            <input type="date" id="progressStartDate" value="${progressStartDate}" onchange="changeProgressDateRange(this.value, progressEndDate)" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            <input type="date" id="progressStartDate" value="${startVal}" onchange="changeProgressDateRange(this.value, '${endVal}')" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
             <span>~</span>
-            <input type="date" id="progressEndDate" value="${progressEndDate}" onchange="changeProgressDateRange(progressStartDate, this.value)" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
+            <input type="date" id="progressEndDate" value="${endVal}" onchange="changeProgressDateRange('${startVal}', this.value)" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); font-size:12px;">
           </div>
         </div>
 
