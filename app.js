@@ -3864,6 +3864,20 @@ function handleCalendarDateClick(dateStr, isHoliday) {
   `);
 }
 
+// 수강 일정 삭제 (원장/강사용 & 공통)
+async function deleteEnrollment(id) {
+  if (confirm("해당 수강신청을 취소(삭제)하시겠습니까?")) {
+    state.enrollments = state.enrollments.filter(e => e.id !== id);
+    try {
+      await supabaseClient.from("agy_enrollments").delete().eq("id", id);
+    } catch(e) { console.warn("DB 삭제 실패, 로컬만 반영", e); }
+    closeModal();
+    if (typeof renderEnrollments === 'function') renderEnrollments();
+    if (typeof renderStudentEnrollments === 'function') renderStudentEnrollments();
+  }
+}
+window.deleteEnrollment = deleteEnrollment;
+
 // 학생용: 해당 날짜 수강 삭제 (로컬 + DB)
 async function deleteEnrollmentLocal(id, dateStr) {
   state.enrollments = state.enrollments.filter(e => e.id !== id);
@@ -4804,6 +4818,26 @@ function renderProgress() {
   const hasEnrollment = state.enrollments.some(e => e.studentId === progressStudentId && e.date === state.selectedDate);
 
   if (!hasAttendance && !hasEnrollment) {
+    const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+    const enrolledDateList = [...new Set(
+      state.enrollments
+        .filter(e => e.studentId === progressStudentId && e.date)
+        .map(e => e.date)
+    )].sort();
+
+    const datePillsHTML = enrolledDateList.map(d => {
+      const dt = new Date(d);
+      const dayName = !isNaN(dt.getDay()) ? dayNames[dt.getDay()] : "";
+      return `
+        <button class="btn btn-secondary" style="font-weight:700; padding:8px 14px; border-radius:8px; background:#ecfdf5; border:1px solid #10b981; color:#047857;"
+          onclick="changeProgressDate('${d}')">
+          📅 ${d} (${dayName})
+        </button>
+      `;
+    }).join('');
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
     container.innerHTML = `
       <div class="page-header">
         <div class="page-title">
@@ -4811,23 +4845,58 @@ function renderProgress() {
           <p>선택하신 날짜(${state.selectedDate})의 학생 수강 등록 정보를 확인합니다.</p>
         </div>
       </div>
-      ${!isStudent ? `
-        <div class="card no-print" style="margin-bottom: 20px;">
-          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-            <label style="font-weight:700; font-size:14px; color:var(--text-dark);">📌 학생 선택 (가나다순):</label>
-            <select onchange="changeProgressStudent(this.value)" style="padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:14px; font-weight:700;">
-              ${studentOptions}
-            </select>
+      
+      <!-- 컨트롤 바: 학생 선택 & 날짜 변경 -->
+      <div class="card no-print" style="margin-bottom: 20px; padding:16px 20px; background:white; border-radius:var(--radius-md); border:1px solid var(--border-color);">
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+          ${!isStudent ? `
+            <div style="display:flex; align-items:center; gap:8px;">
+              <label style="font-weight:700; font-size:14px; color:var(--text-dark);">📌 학생 선택:</label>
+              <select onchange="changeProgressStudent(this.value)" style="padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:14px; font-weight:700;">
+                ${studentOptions}
+              </select>
+            </div>
+          ` : ''}
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label style="font-weight:700; font-size:14px; color:var(--text-dark);">📅 날짜 선택:</label>
+            <input type="date" value="${state.selectedDate}" onchange="changeProgressDate(this.value)" style="padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:14px; font-weight:700;">
           </div>
+          <button class="btn btn-secondary" style="font-size:13px; font-weight:700; padding:8px 14px;" onclick="changeProgressDate('${todayStr}')">
+            🔄 오늘 날짜(${todayStr})로 이동
+          </button>
         </div>
-      ` : ''}
-      <div style="padding:50px 20px; text-align:center; margin-top:20px; color:var(--text-muted); background:white; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
-        <i data-lucide="alert-circle" style="width:64px; height:64px; color:var(--accent-red); margin-bottom:16px;"></i>
+      </div>
+
+      <!-- 경고 카드 -->
+      <div style="padding:40px 24px; text-align:center; color:var(--text-muted); background:white; border-radius:var(--radius-lg); border:1px solid var(--border-color); box-shadow:var(--shadow-md);">
+        <i data-lucide="alert-circle" style="width:56px; height:56px; color:var(--accent-red); margin-bottom:16px;"></i>
         <h2 style="color:var(--text-dark); margin-bottom:12px; font-size:20px; font-weight:800;">수강 등록 확인 필요</h2>
-        <p style="font-size:14px; line-height:1.6; color:#475569;">
-          선택하신 학생 <strong>${escapeHTML(st ? st.name : '')}</strong>(은)는 해당 날짜(<strong>${state.selectedDate}</strong>)에 수강 등록(시간표 등록)이 되어 있지 않습니다.<br>
-          [수강 관리] 메뉴에서 수강 시간표를 먼저 등록하신 후 진도 관리를 진행해 주세요.
+        <p style="font-size:14px; line-height:1.6; color:#475569; max-width:640px; margin:0 auto 24px auto;">
+          선택하신 학생 <strong>${escapeHTML(st ? st.name : '')}</strong>(은)는 해당 날짜(<strong>${state.selectedDate}</strong>)에 수강 등록(시간표)이 되어 있지 않습니다.<br>
+          아래의 <strong style="color:var(--primary-color);">등록된 수강 날짜 바로가기</strong>를 선택하거나, <strong style="color:var(--primary-color);">수강 시간표 등록 메뉴</strong>에서 수강 일정을 먼저 등록해 주세요.
         </p>
+
+        ${enrolledDateList.length > 0 ? `
+          <div style="margin-bottom:28px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:20px; max-width:640px; margin-left:auto; margin-right:auto;">
+            <div style="font-size:14px; font-weight:800; color:#1e293b; margin-bottom:12px; text-align:left;">
+              📌 ${escapeHTML(st ? st.name : '학생')}의 등록된 수강 날짜 바로가기:
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-start;">
+              ${datePillsHTML}
+            </div>
+          </div>
+        ` : `
+          <div style="margin-bottom:24px; color:#94a3b8; font-size:13px;">
+            ⚠️ 등록된 수강 일정이 없습니다. 수강 시간표 신청/등록 메뉴에서 일정을 먼저 등록해 주세요.
+          </div>
+        `}
+
+        <div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
+          <button class="btn btn-primary" style="padding:12px 24px; font-size:14px; font-weight:800;"
+            onclick="navigate('${isStudent ? 'studentEnrollments' : 'enrollments'}')">
+            <i data-lucide="calendar"></i> 📅 수강 시간표 신청 / 등록 메뉴로 이동
+          </button>
+        </div>
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
@@ -5889,13 +5958,19 @@ function closePublicHomepage() {
 window.closePublicHomepage = closePublicHomepage;
 
 function handleHomepageContact(event) {
-  event.preventDefault();
-  const name = document.getElementById("contactName").value;
-  const phone = document.getElementById("contactPhone").value;
-  const field = document.getElementById("contactField").value;
+  if (event && event.preventDefault) event.preventDefault();
+  const nameEl = document.getElementById("contactName") || document.getElementById("modalContactName");
+  const phoneEl = document.getElementById("contactPhone") || document.getElementById("modalContactPhone");
+  const fieldEl = document.getElementById("contactField") || document.getElementById("modalContactGrade");
+  
+  const name = nameEl ? nameEl.value : "";
+  const phone = phoneEl ? phoneEl.value : "";
+  const field = fieldEl ? fieldEl.value : "";
   
   alert(`${name} 학생의 [${field}] 간편 상담 신청이 접수되었습니다.\n학원에서 내용을 검토한 후 입력하신 연락처(${phone})로 신속하게 안내해 드리겠습니다. 감사합니다!`);
-  event.target.reset();
+  if (event && event.target && typeof event.target.reset === 'function') {
+    event.target.reset();
+  }
 }
 
 function openConsultationModal(field) {
@@ -5936,14 +6011,19 @@ function openConsultationModal(field) {
   `;
   const overlay = document.getElementById('globalModal');
   const modalContent = document.getElementById('modalContent');
-  modalContent.innerHTML = '';
-  modalContent.appendChild(content);
-  overlay.style.display = 'flex';
+  if (modalContent) {
+    modalContent.innerHTML = '';
+    modalContent.appendChild(content);
+  }
+  if (overlay) overlay.style.display = 'flex';
   if (window.lucide) window.lucide.createIcons();
 
-  document.getElementById('consultSubmitBtn').addEventListener('click', function() {
-    handleHomepageContactModal(field);
-  });
+  const submitBtn = document.getElementById('consultSubmitBtn');
+  if (submitBtn) {
+    submitBtn.addEventListener('click', function() {
+      handleHomepageContactModal(field);
+    });
+  }
 }
 
 
