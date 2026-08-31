@@ -6786,7 +6786,7 @@ function saveBackupToHistory(backupData) {
 }
 window.saveBackupToHistory = saveBackupToHistory;
 
-// 백업 히스토리 삭제
+// 백업 히스토리 단일 삭제
 function deleteBackupFromHistory(fileTag) {
   if (!confirm("선택한 백업 기록을 이력에서 삭제하시겠습니까?")) return;
   let history = getBackupHistory();
@@ -6797,6 +6797,35 @@ function deleteBackupFromHistory(fileTag) {
   renderBackupView();
 }
 window.deleteBackupFromHistory = deleteBackupFromHistory;
+
+// 백업 히스토리 전체 선택/해제
+function toggleSelectAllBackups(checked) {
+  document.querySelectorAll('.backup-select-chk').forEach(chk => chk.checked = checked);
+}
+window.toggleSelectAllBackups = toggleSelectAllBackups;
+
+// 백업 히스토리 선택 일괄 삭제
+function deleteSelectedBackups() {
+  const selectedChks = Array.from(document.querySelectorAll('.backup-select-chk:checked')).map(c => c.value);
+  if (selectedChks.length === 0) {
+    alert("삭제할 백업 항목을 1개 이상 선택해 주세요.");
+    return;
+  }
+
+  if (!confirm(`선택한 ${selectedChks.length}개의 백업 스냅샷을 이력에서 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  let history = getBackupHistory();
+  history = history.filter(item => !selectedChks.includes(item.fileTag));
+  try {
+    localStorage.setItem("yuju_backup_history", JSON.stringify(history));
+  } catch(e) {}
+
+  alert(`선택한 ${selectedChks.length}개의 백업 기록이 삭제되었습니다.`);
+  renderBackupView();
+}
+window.deleteSelectedBackups = deleteSelectedBackups;
 
 // 전체 데이터 즉시 백업 실행 (파일 저장 + 히스토리 등록)
 function handleCreateBackup() {
@@ -7138,7 +7167,7 @@ function renderBackupView() {
   const history = getBackupHistory();
   const historyRows = history.length === 0 ? `
     <tr>
-      <td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted);">
+      <td colspan="7" style="text-align:center; padding:32px; color:var(--text-muted);">
         등록된 백업 스냅샷 이력이 없습니다. 상단의 <b>[전체 데이터 즉시 백업]</b> 버튼을 눌러 새 백업을 생성하세요.
       </td>
     </tr>
@@ -7148,6 +7177,9 @@ function renderBackupView() {
 
     return `
       <tr style="border-bottom:1px solid var(--border-color);">
+        <td style="padding:12px; text-align:center;">
+          <input type="checkbox" class="backup-select-chk" value="${item.fileTag}" style="width:16px; height:16px; cursor:pointer;">
+        </td>
         <td style="padding:12px; font-weight:800; text-align:center;">#${idx + 1}</td>
         <td style="padding:12px;">
           <div style="font-weight:800; color:var(--text-dark);">${item.createdDate} ${item.createdTime}</div>
@@ -7224,13 +7256,19 @@ function renderBackupView() {
     <div class="card">
       <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
         <span>📜 백업 현황 대장 및 스냅샷 이력</span>
-        <span style="font-size:12px; font-weight:normal; color:var(--text-muted);">최근 백업 스냅샷 최대 10개 자동 보존</span>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:12px; font-weight:normal; color:var(--text-muted);">최근 백업 스냅샷 최대 10개 자동 보존</span>
+          <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:12px; color:#ef4444; border:1px solid #fecaca; background:#fff1f2; font-weight:700; cursor:pointer;" onclick="deleteSelectedBackups()">🗑️ 선택 백업 삭제</button>
+        </div>
       </div>
 
       <div style="overflow-x:auto;">
         <table class="table" style="width:100%; border-collapse:collapse;">
           <thead>
             <tr style="background:var(--bg-app); border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-muted);">
+              <th style="padding:10px; width:40px; text-align:center;">
+                <input type="checkbox" id="selectAllBackups" style="width:16px; height:16px; cursor:pointer;" onchange="toggleSelectAllBackups(this.checked)">
+              </th>
               <th style="padding:10px; width:60px; text-align:center;">번호</th>
               <th style="padding:10px; width:180px;">백업 일시</th>
               <th style="padding:10px;">포함 데이터 현황</th>
