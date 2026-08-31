@@ -548,7 +548,8 @@ function renderSidebarMenu() {
     { key: "studentEnrollments", label: "학생별 시간표", icon: "user-check", roles: ["director", "teacher", "assistant", "student"] },
     { key: "progress", label: "진도 관리", icon: "book-open-check", roles: ["director", "teacher", "assistant", "student"] },
     { key: "teacherLog", label: "근무 일지 작성", icon: "clock", roles: ["teacher"] },
-    { key: "teacherLogApproval", label: "강사 출퇴근 결재", icon: "badge-check", roles: ["director", "assistant"] }
+    { key: "teacherLogApproval", label: "강사 출퇴근 결재", icon: "badge-check", roles: ["director", "assistant"] },
+    { key: "backup", label: "데이터 백업 및 복구", icon: "database", roles: ["director"] }
   ];
   
   allMenus.forEach(menu => {
@@ -606,6 +607,9 @@ function navigate(viewKey) {
     case "teacherLogApproval":
       if (typeof renderTeacherLogApprovalView === 'function') renderTeacherLogApprovalView();
       break;
+    case "backup":
+      if (typeof renderBackupView === 'function') renderBackupView();
+      break;
   }
 
   // 3. 백그라운드 데이터 비동기 최신화 (메뉴 진입을 막지 않음)
@@ -616,6 +620,7 @@ function navigate(viewKey) {
         else if (viewKey === 'enrollments' && typeof renderEnrollments === 'function') renderEnrollments();
         else if (viewKey === 'progress' && typeof renderProgress === 'function') renderProgress();
         else if (viewKey === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+        else if (viewKey === 'backup' && typeof renderBackupView === 'function') renderBackupView();
       }
     }).catch(e => console.warn("Background load notice:", e));
   }
@@ -6663,3 +6668,585 @@ async function approveSingleNewPlanRow(btnEl, studentId) {
   }
 }
 window.approveSingleNewPlanRow = approveSingleNewPlanRow;
+
+// ==============================================================================
+// 10. 원장 전용 - 전체 데이터 백업, 이력 관리, 파일 추출 및 선택 복구 모듈
+// ==============================================================================
+
+// 백업 데이터 수집 및 메타데이터 생성
+function createFullBackupData() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const fileDateTag = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  
+  const creator = state.currentUser ? (state.currentUser.username || '원장') : '원장';
+
+  const backupPayload = {
+    version: "1.0",
+    system: "유주코칭국어학원 통합관리시스템",
+    createdAt: now.toISOString(),
+    createdDate: dateStr,
+    createdTime: timeStr,
+    fileTag: fileDateTag,
+    creator: creator,
+    summary: {
+      studentsCount: (state.students || []).length,
+      teachersCount: (state.teachers || []).length,
+      schedulesCount: (state.teacherSchedules || []).length,
+      workLogsCount: (state.teacherWorkLogs || []).length,
+      enrollmentsCount: (state.enrollments || []).length,
+      attendanceCount: (state.attendance || []).length,
+      dailyPlansCount: (state.dailyPlans || []).length,
+      progressCommentsCount: Object.keys(state.progressComments || {}).length,
+      noticesCount: (state.notices || []).length,
+      consultationsCount: (state.consultations || []).length,
+      monthlyOperationsCount: Object.keys(state.monthlyOperations || {}).length
+    },
+    data: {
+      students: state.students || [],
+      teachers: state.teachers || [],
+      teacherSchedules: state.teacherSchedules || [],
+      teacherWorkLogs: state.teacherWorkLogs || [],
+      enrollments: state.enrollments || [],
+      attendance: state.attendance || [],
+      dailyPlans: state.dailyPlans || [],
+      progressComments: state.progressComments || {},
+      notices: state.notices || [],
+      consultations: state.consultations || [],
+      monthlyOperations: state.monthlyOperations || {},
+      calendarScans: state.calendarScans || {}
+    }
+  };
+
+  return backupPayload;
+}
+window.createFullBackupData = createFullBackupData;
+
+// 백업 JSON 파일 브라우저 다운로드
+function exportBackupToFile(backupData) {
+  if (!backupData) backupData = createFullBackupData();
+  const jsonString = JSON.stringify(backupData, null, 2);
+  const blob = new Blob([jsonString], { type: "application/json;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const fileName = `yuju_academy_full_backup_${backupData.fileTag || Date.now()}.json`;
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", fileName);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+window.exportBackupToFile = exportBackupToFile;
+
+// 백업 현황 (히스토리) 불러오기 및 저장
+function getBackupHistory() {
+  try {
+    const historyJson = localStorage.getItem("yuju_backup_history");
+    return historyJson ? JSON.parse(historyJson) : [];
+  } catch (e) {
+    return [];
+  }
+}
+window.getBackupHistory = getBackupHistory;
+
+function saveBackupToHistory(backupData) {
+  if (!backupData) return;
+  const history = getBackupHistory();
+  const existingIdx = history.findIndex(item => item.fileTag === backupData.fileTag);
+  
+  const historyItem = {
+    fileTag: backupData.fileTag,
+    createdAt: backupData.createdAt,
+    createdDate: backupData.createdDate,
+    createdTime: backupData.createdTime,
+    creator: backupData.creator,
+    summary: backupData.summary,
+    dataSizeKB: Math.round(JSON.stringify(backupData).length / 1024),
+    payload: backupData
+  };
+
+  if (existingIdx !== -1) {
+    history[existingIdx] = historyItem;
+  } else {
+    history.unshift(historyItem);
+  }
+
+  // 최대 10개 스냅샷 보존
+  const trimmed = history.slice(0, 10);
+  try {
+    localStorage.setItem("yuju_backup_history", JSON.stringify(trimmed));
+  } catch(e) {
+    console.warn("백업 히스토리 저장 용량 초과:", e);
+  }
+}
+window.saveBackupToHistory = saveBackupToHistory;
+
+// 백업 히스토리 삭제
+function deleteBackupFromHistory(fileTag) {
+  if (!confirm("선택한 백업 기록을 이력에서 삭제하시겠습니까?")) return;
+  let history = getBackupHistory();
+  history = history.filter(item => item.fileTag !== fileTag);
+  try {
+    localStorage.setItem("yuju_backup_history", JSON.stringify(history));
+  } catch(e) {}
+  renderBackupView();
+}
+window.deleteBackupFromHistory = deleteBackupFromHistory;
+
+// 전체 데이터 즉시 백업 실행 (파일 저장 + 히스토리 등록)
+function handleCreateBackup() {
+  const backupData = createFullBackupData();
+  saveBackupToHistory(backupData);
+  exportBackupToFile(backupData);
+  alert(`💾 전체 데이터 백업이 완료되었습니다.\n\n▶ 백업 파일: yuju_academy_full_backup_${backupData.fileTag}.json\n▶ 백업 현황 대장에 스냅샷이 기록되었습니다.`);
+  renderBackupView();
+}
+window.handleCreateBackup = handleCreateBackup;
+
+// JSON 파일 업로드 처리
+function handleBackupFileUpload(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const parsedData = JSON.parse(e.target.result);
+      if (!parsedData || !parsedData.data) {
+        alert("올바르지 않은 백업 파일 형식입니다. (data 객체가 존재하지 않음)");
+        return;
+      }
+      saveBackupToHistory(parsedData);
+      openSelectiveRestoreModal(parsedData);
+    } catch(err) {
+      alert("백업 파일 파싱 중 오류가 발생했습니다: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+window.handleBackupFileUpload = handleBackupFileUpload;
+
+// 선택 복구 모달 창 띄우기
+function openSelectiveRestoreModal(backupData) {
+  if (!backupData || !backupData.data) {
+    alert("복구할 데이터가 올바르지 않습니다.");
+    return;
+  }
+
+  const d = backupData.data;
+
+  openModal(`
+    <div class="modal-header">
+      <h3>⚡ 백업 데이터 복구 및 항목 선택</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="max-height: 80vh; overflow-y: auto;">
+      <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:12px 16px; margin-bottom:16px;">
+        <div style="font-weight:800; font-size:14px; color:#0369a1; margin-bottom:4px;">
+          📦 백업 파일 정보: ${backupData.createdDate || ''} ${backupData.createdTime || ''} (${backupData.creator || '원장'})
+        </div>
+        <div style="font-size:12px; color:#334155;">
+          버전: ${backupData.version || '1.0'} | 파일 태그: ${backupData.fileTag || '-'}
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <label style="font-weight:800; font-size:14px; color:var(--text-dark); display:block; margin-bottom:8px;">
+          1. 복구 방식 선택:
+        </label>
+        <div style="display:flex; gap:16px; background:#f8fafc; padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+          <label style="font-size:13px; font-weight:700; cursor:pointer;">
+            <input type="radio" name="restoreMode" value="replace" checked> 덮어쓰기 복구 (기존 데이터 교체)
+          </label>
+          <label style="font-size:13px; font-weight:700; cursor:pointer;">
+            <input type="radio" name="restoreMode" value="merge"> 병합 복구 (기존 데이터 유지 + 추가)
+          </label>
+        </div>
+      </div>
+
+      <div style="margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <label style="font-weight:800; font-size:14px; color:var(--text-dark);">
+            2. 복구할 항목 선택 (필요한 항목만 체크):
+          </label>
+          <button type="button" class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="toggleAllRestoreCheckboxes(true)">전체 선택</button>
+        </div>
+        
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <label style="background:white; border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" class="restore-chk" value="students" checked style="width:16px; height:16px;">
+            <div>
+              <div style="font-weight:700; font-size:13px;">👥 학생 정보</div>
+              <div style="font-size:11px; color:var(--text-muted);">${(d.students||[]).length}개 레코드</div>
+            </div>
+          </label>
+
+          <label style="background:white; border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" class="restore-chk" value="teachers" checked style="width:16px; height:16px;">
+            <div>
+              <div style="font-weight:700; font-size:13px;">👩‍🏫 강사 정보 & 근무기록</div>
+              <div style="font-size:11px; color:var(--text-muted);">${(d.teachers||[]).length}명 / 근무일지 ${(d.teacherWorkLogs||[]).length}건</div>
+            </div>
+          </label>
+
+          <label style="background:white; border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" class="restore-chk" value="enrollments" checked style="width:16px; height:16px;">
+            <div>
+              <div style="font-weight:700; font-size:13px;">📅 수강 신청 & 시간표</div>
+              <div style="font-size:11px; color:var(--text-muted);">${(d.enrollments||[]).length}개 레코드</div>
+            </div>
+          </label>
+
+          <label style="background:white; border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" class="restore-chk" value="attendance" checked style="width:16px; height:16px;">
+            <div>
+              <div style="font-weight:700; font-size:13px;">⏰ 출결 기록</div>
+              <div style="font-size:11px; color:var(--text-muted);">${(d.attendance||[]).length}개 레코드</div>
+            </div>
+          </label>
+
+          <label style="background:white; border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" class="restore-chk" value="dailyPlans" checked style="width:16px; height:16px;">
+            <div>
+              <div style="font-weight:700; font-size:13px;">📖 당일 진도계획 & 지도사항</div>
+              <div style="font-size:11px; color:var(--text-muted);">${(d.dailyPlans||[]).length}개 / 코멘트 ${Object.keys(d.progressComments||{}).length}건</div>
+            </div>
+          </label>
+
+          <label style="background:white; border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" class="restore-chk" value="notices" checked style="width:16px; height:16px;">
+            <div>
+              <div style="font-weight:700; font-size:13px;">📢 공지사항 & 상담 신청</div>
+              <div style="font-size:11px; color:var(--text-muted);">${(d.notices||[]).length}건 / 상담 ${(d.consultations||[]).length}건</div>
+            </div>
+          </label>
+
+          <label style="background:white; border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" class="restore-chk" value="monthlyOperations" checked style="width:16px; height:16px;">
+            <div>
+              <div style="font-weight:700; font-size:13px;">🗓️ 월별 운영시간 설정</div>
+              <div style="font-size:11px; color:var(--text-muted);">${Object.keys(d.monthlyOperations||{}).length}개 월 설정</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div style="background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; padding:12px 14px; margin-bottom:20px; font-size:12.5px; color:#991b1b;">
+        ⚠️ 복구 실행 시 현재 시스템 데이터가 백업 데이터로 복원됩니다. 계속 진행하시겠습니까?
+      </div>
+
+      <div style="display:flex; gap:10px;">
+        <button type="button" class="btn btn-secondary" style="flex:1; justify-content:center;" onclick="closeModal()">취소</button>
+        <button type="button" class="btn btn-emerald" style="flex:2; justify-content:center; background:#dc2626; border:none; color:white; font-weight:800;" onclick="confirmAndExecuteRestore('${backupData.fileTag}')">⚡ 선택 항목 복구 실행</button>
+      </div>
+    </div>
+  `);
+}
+window.openSelectiveRestoreModal = openSelectiveRestoreModal;
+
+function toggleAllRestoreCheckboxes(checked) {
+  document.querySelectorAll('.restore-chk').forEach(chk => chk.checked = checked);
+}
+window.toggleAllRestoreCheckboxes = toggleAllRestoreCheckboxes;
+
+// 복구 실행
+async function confirmAndExecuteRestore(fileTag) {
+  const history = getBackupHistory();
+  const backupItem = history.find(item => item.fileTag === fileTag);
+  const backupData = backupItem ? backupItem.payload : null;
+
+  if (!backupData || !backupData.data) {
+    alert("복구할 데이터 스냅샷을 찾을 수 없습니다.");
+    return;
+  }
+
+  const selectedChks = Array.from(document.querySelectorAll('.restore-chk:checked')).map(c => c.value);
+  if (selectedChks.length === 0) {
+    alert("복구할 항목을 1개 이상 선택해 주세요.");
+    return;
+  }
+
+  const modeEl = document.querySelector('input[name="restoreMode"]:checked');
+  const restoreMode = modeEl ? modeEl.value : 'replace';
+
+  if (!confirm(`선택한 ${selectedChks.length}개 항목에 대해 [${restoreMode === 'replace' ? '덮어쓰기 복구' : '병합 복구'}]를 실행하시겠습니까?`)) {
+    return;
+  }
+
+  const d = backupData.data;
+
+  // 1. 학생 정보 복구
+  if (selectedChks.includes("students") && d.students) {
+    if (restoreMode === 'replace') {
+      state.students = d.students;
+    } else {
+      const existingMap = new Map((state.students || []).map(s => [s.id, s]));
+      d.students.forEach(s => existingMap.set(s.id, s));
+      state.students = Array.from(existingMap.values());
+    }
+    if (supabaseClient && d.students.length > 0) {
+      try {
+        const rows = d.students.map(s => ({ id: s.id, data: s }));
+        await supabaseClient.from("agy_students").upsert(rows);
+      } catch(e) { console.warn("Supabase students restore notice:", e); }
+    }
+  }
+
+  // 2. 강사 정보 & 근무일지 복구
+  if (selectedChks.includes("teachers") && d.teachers) {
+    if (restoreMode === 'replace') {
+      state.teachers = d.teachers;
+      state.teacherSchedules = d.teacherSchedules || [];
+      state.teacherWorkLogs = d.teacherWorkLogs || [];
+    } else {
+      const tcMap = new Map((state.teachers || []).map(t => [t.id, t]));
+      d.teachers.forEach(t => tcMap.set(t.id, t));
+      state.teachers = Array.from(tcMap.values());
+
+      if (d.teacherSchedules) {
+        const schMap = new Map((state.teacherSchedules || []).map(s => [s.id, s]));
+        d.teacherSchedules.forEach(s => schMap.set(s.id, s));
+        state.teacherSchedules = Array.from(schMap.values());
+      }
+      if (d.teacherWorkLogs) {
+        const wlMap = new Map((state.teacherWorkLogs || []).map(w => [w.id, w]));
+        d.teacherWorkLogs.forEach(w => wlMap.set(w.id, w));
+        state.teacherWorkLogs = Array.from(wlMap.values());
+      }
+    }
+    if (supabaseClient) {
+      try {
+        if (d.teachers.length > 0) await supabaseClient.from("agy_teachers").upsert(d.teachers.map(t => ({ id: t.id, data: t })));
+        if (d.teacherSchedules && d.teacherSchedules.length > 0) await supabaseClient.from("agy_teacher_schedules").upsert(d.teacherSchedules.map(s => ({ id: s.id, data: s })));
+        if (d.teacherWorkLogs && d.teacherWorkLogs.length > 0) await supabaseClient.from("agy_teacher_worklogs").upsert(d.teacherWorkLogs.map(w => ({ id: w.id, data: w })));
+      } catch(e) {}
+    }
+  }
+
+  // 3. 수강 관리 복구
+  if (selectedChks.includes("enrollments") && d.enrollments) {
+    if (restoreMode === 'replace') {
+      state.enrollments = d.enrollments;
+    } else {
+      const enrMap = new Map((state.enrollments || []).map(e => [e.id, e]));
+      d.enrollments.forEach(e => enrMap.set(e.id, e));
+      state.enrollments = Array.from(enrMap.values());
+    }
+    if (supabaseClient && d.enrollments.length > 0) {
+      try {
+        await supabaseClient.from("agy_enrollments").upsert(d.enrollments.map(e => ({ id: e.id, data: e })));
+      } catch(e) {}
+    }
+  }
+
+  // 4. 출결 기록 복구
+  if (selectedChks.includes("attendance") && d.attendance) {
+    if (restoreMode === 'replace') {
+      state.attendance = d.attendance;
+    } else {
+      const attMap = new Map((state.attendance || []).map(a => [a.id, a]));
+      d.attendance.forEach(a => attMap.set(a.id, a));
+      state.attendance = Array.from(attMap.values());
+    }
+    if (supabaseClient && d.attendance.length > 0) {
+      try {
+        await supabaseClient.from("agy_attendance").upsert(d.attendance.map(a => ({ id: a.id, data: a })));
+      } catch(e) {}
+    }
+  }
+
+  // 5. 당일 진도계획 및 지도사항 복구
+  if (selectedChks.includes("dailyPlans") && d.dailyPlans) {
+    if (restoreMode === 'replace') {
+      state.dailyPlans = d.dailyPlans;
+      state.progressComments = d.progressComments || {};
+    } else {
+      const planMap = new Map((state.dailyPlans || []).map(p => [p.id, p]));
+      d.dailyPlans.forEach(p => planMap.set(p.id, p));
+      state.dailyPlans = Array.from(planMap.values());
+      state.progressComments = Object.assign({}, state.progressComments || {}, d.progressComments || {});
+    }
+    try {
+      localStorage.setItem("agy_daily_plans_backup", JSON.stringify(state.dailyPlans));
+      localStorage.setItem("agy_progress_comments", JSON.stringify(state.progressComments));
+    } catch(e) {}
+    if (supabaseClient && d.dailyPlans.length > 0) {
+      try {
+        await supabaseClient.from("agy_daily_plans").upsert(d.dailyPlans.map(p => ({ id: p.id, data: p })));
+      } catch(e) {}
+    }
+  }
+
+  // 6. 공지사항 및 상담 신청 복구
+  if (selectedChks.includes("notices")) {
+    if (d.notices) {
+      if (restoreMode === 'replace') state.notices = d.notices;
+      else {
+        const nMap = new Map((state.notices || []).map(n => [n.id, n]));
+        d.notices.forEach(n => nMap.set(n.id, n));
+        state.notices = Array.from(nMap.values());
+      }
+      if (supabaseClient && d.notices.length > 0) {
+        try { await supabaseClient.from("agy_notices").upsert(d.notices.map(n => ({ id: n.id, data: n }))); } catch(e) {}
+      }
+    }
+    if (d.consultations) {
+      if (restoreMode === 'replace') state.consultations = d.consultations;
+      else {
+        const cMap = new Map((state.consultations || []).map(c => [c.id, c]));
+        d.consultations.forEach(c => cMap.set(c.id, c));
+        state.consultations = Array.from(cMap.values());
+      }
+      if (supabaseClient && d.consultations.length > 0) {
+        try { await supabaseClient.from("agy_consultations").upsert(d.consultations.map(c => ({ id: c.id, data: c }))); } catch(e) {}
+      }
+    }
+  }
+
+  // 7. 월별 운영시간 복구
+  if (selectedChks.includes("monthlyOperations") && d.monthlyOperations) {
+    if (restoreMode === 'replace') {
+      state.monthlyOperations = d.monthlyOperations;
+    } else {
+      state.monthlyOperations = Object.assign({}, state.monthlyOperations || {}, d.monthlyOperations);
+    }
+    if (supabaseClient) {
+      try {
+        for (const [ym, configs] of Object.entries(d.monthlyOperations)) {
+          await supabaseClient.from("agy_monthly_operations").upsert([{ year_month: ym, configs }]);
+        }
+      } catch(e) {}
+    }
+  }
+
+  closeModal();
+  alert("🎉 백업 데이터 선택 복구가 성공적으로 완료되었습니다!");
+  renderBackupView();
+}
+window.confirmAndExecuteRestore = confirmAndExecuteRestore;
+
+// 원장 메인 뷰: 데이터 백업 및 복구 관리 화면
+function renderBackupView() {
+  const container = document.getElementById("mainContent");
+  if (!container) return;
+
+  const history = getBackupHistory();
+  const historyRows = history.length === 0 ? `
+    <tr>
+      <td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted);">
+        등록된 백업 스냅샷 이력이 없습니다. 상단의 <b>[전체 데이터 즉시 백업]</b> 버튼을 눌러 새 백업을 생성하세요.
+      </td>
+    </tr>
+  ` : history.map((item, idx) => {
+    const s = item.summary || {};
+    const detailsText = `학생:${s.studentsCount||0}명, 강사:${s.teachersCount||0}명, 수강:${s.enrollmentsCount||0}건, 출결:${s.attendanceCount||0}건, 진도:${s.dailyPlansCount||0}건`;
+
+    return `
+      <tr style="border-bottom:1px solid var(--border-color);">
+        <td style="padding:12px; font-weight:800; text-align:center;">#${idx + 1}</td>
+        <td style="padding:12px;">
+          <div style="font-weight:800; color:var(--text-dark);">${item.createdDate} ${item.createdTime}</div>
+          <div style="font-size:11px; color:var(--text-muted);">태그: ${item.fileTag}</div>
+        </td>
+        <td style="padding:12px; font-size:12px; color:#334155;">
+          ${detailsText}
+        </td>
+        <td style="padding:12px; text-align:center; font-weight:700; font-size:12px; color:var(--primary-color);">
+          ${item.dataSizeKB || 0} KB
+        </td>
+        <td style="padding:12px; text-align:center; font-size:12px; color:var(--text-dark);">
+          ${item.creator || '원장'}
+        </td>
+        <td style="padding:12px; text-align:center;">
+          <div style="display:flex; gap:6px; justify-content:center;">
+            <button class="btn btn-emerald" style="padding:5px 10px; font-size:12px; background:#0284c7; border:none;" onclick='openSelectiveRestoreModal(${JSON.stringify(item.payload)})'>⚡ 선택 복구</button>
+            <button class="btn btn-secondary" style="padding:5px 10px; font-size:12px;" onclick='exportBackupToFile(${JSON.stringify(item.payload)})'>💾 파일 저장</button>
+            <button class="btn btn-secondary" style="padding:5px 10px; font-size:12px; color:#ef4444; border:1px solid #fecaca; background:#fff1f2;" onclick="deleteBackupFromHistory('${item.fileTag}')">🗑️</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">
+        <h1>데이터 백업 및 복구 관리 (원장 전용)</h1>
+        <p>학원 전체 시스템 데이터(학생, 강사, 수강, 출결, 진도, 지도사항 등)를 파일로 보관하고 원할 때 선택 복구합니다.</p>
+      </div>
+      <div class="action-bar">
+        <button class="btn btn-emerald" style="padding:12px 20px; font-size:14px; font-weight:800; background:var(--primary-color); border:none;" onclick="handleCreateBackup()">
+          <i data-lucide="download-cloud"></i> 💾 전체 데이터 즉시 백업 (파일 저장)
+        </button>
+      </div>
+    </div>
+
+    <!-- 백업 생성 & 파일 불러오기 카드리스트 -->
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-bottom:24px;">
+      <div class="card" style="margin-bottom:0; background:linear-gradient(to right, #ecfdf5, #ffffff); border:2px solid #10b981;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+          <div style="width:40px; height:40px; border-radius:10px; background:#10b981; color:white; display:flex; align-items:center; justify-content:center;">
+            <i data-lucide="database" style="width:24px; height:24px;"></i>
+          </div>
+          <div>
+            <h3 style="margin:0; font-size:16px; color:#047857;">전체 시스템 데이터 일괄 백업</h3>
+            <p style="margin:0; font-size:12px; color:#065f46;">현재 시스템의 모든 상태와 DB 데이터를 수집하여 JSON 파일로 보관합니다.</p>
+          </div>
+        </div>
+        <button class="btn btn-emerald" style="width:100%; justify-content:center; font-weight:800; padding:12px;" onclick="handleCreateBackup()">
+          📥 파일로 내려받기 (yuju_academy_full_backup.json)
+        </button>
+      </div>
+
+      <div class="card" style="margin-bottom:0; background:linear-gradient(to right, #f0f9ff, #ffffff); border:2px solid #0284c7;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+          <div style="width:40px; height:40px; border-radius:10px; background:#0284c7; color:white; display:flex; align-items:center; justify-content:center;">
+            <i data-lucide="upload-cloud" style="width:24px; height:24px;"></i>
+          </div>
+          <div>
+            <h3 style="margin:0; font-size:16px; color:#0369a1;">백업 파일 불러와서 복구하기</h3>
+            <p style="margin:0; font-size:12px; color:#075985;">보관 중인 JSON 백업 파일을 선택하여 원하는 항목만 지정 복구합니다.</p>
+          </div>
+        </div>
+        <input type="file" id="backupFileInput" accept=".json" style="display:none;" onchange="handleBackupFileUpload(event)">
+        <button class="btn btn-primary" style="width:100%; justify-content:center; font-weight:800; padding:12px; background:#0284c7; border:none;" onclick="document.getElementById('backupFileInput').click()">
+          📂 백업 파일 선택 및 복구 시작
+        </button>
+      </div>
+    </div>
+
+    <!-- 백업 히스토리 (현황 대장) -->
+    <div class="card">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>📜 백업 현황 대장 및 스냅샷 이력</span>
+        <span style="font-size:12px; font-weight:normal; color:var(--text-muted);">최근 백업 스냅샷 최대 10개 자동 보존</span>
+      </div>
+
+      <div style="overflow-x:auto;">
+        <table class="table" style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="background:var(--bg-app); border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-muted);">
+              <th style="padding:10px; width:60px; text-align:center;">번호</th>
+              <th style="padding:10px; width:180px;">백업 일시</th>
+              <th style="padding:10px;">포함 데이터 현황</th>
+              <th style="padding:10px; width:100px; text-align:center;">파일 용량</th>
+              <th style="padding:10px; width:100px; text-align:center;">생성자</th>
+              <th style="padding:10px; width:250px; text-align:center;">복구 및 백업 작업</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${historyRows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  if (window.lucide) window.lucide.createIcons();
+}
+window.renderBackupView = renderBackupView;
