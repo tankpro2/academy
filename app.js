@@ -275,7 +275,31 @@ async function loadAllData() {
     state.enrollments = (resEnrollments.data || []).map(r => r.data);
     state.attendance = (resAttendance.data || []).map(r => r.data);
     if (resDailyPlans && resDailyPlans.data && resDailyPlans.data.length > 0) {
-      state.dailyPlans = resDailyPlans.data.map(r => r.data || r).filter(Boolean);
+      const fetchedPlans = resDailyPlans.data.map(r => r.data || r).filter(Boolean);
+      // 로컬스토리지 백업 데이터와 병합하여 지도사항 및 미동기화 플랜 유실 방지
+      const cachedStr = localStorage.getItem("agy_daily_plans_backup");
+      if (cachedStr) {
+        try {
+          const cachedList = JSON.parse(cachedStr);
+          if (Array.isArray(cachedList)) {
+            const cachedMap = new Map(cachedList.map(p => [p.id, p]));
+            fetchedPlans.forEach(p => {
+              const cached = cachedMap.get(p.id);
+              if (cached) {
+                if (!p.guideComment && cached.guideComment) p.guideComment = cached.guideComment;
+                if (!p.directorComment && cached.directorComment) p.directorComment = cached.directorComment;
+                if (!p.teacherComment && cached.teacherComment) p.teacherComment = cached.teacherComment;
+              }
+            });
+            cachedList.forEach(cp => {
+              if (cp && cp.id && !fetchedPlans.some(fp => fp.id === cp.id)) {
+                fetchedPlans.push(cp);
+              }
+            });
+          }
+        } catch (e) {}
+      }
+      state.dailyPlans = fetchedPlans;
       try { localStorage.setItem("agy_daily_plans_backup", JSON.stringify(state.dailyPlans)); } catch(e) {}
     } else {
       const cachedPlans = localStorage.getItem("agy_daily_plans_backup");
@@ -4533,6 +4557,9 @@ async function submitDailyPlans(studentId) {
         let duration = (eh * 60 + em) - (sh * 60 + sm);
         if (duration <= 0) duration = 60;
 
+        const existingCommentPlan = plansToday.find(p => p.guideComment || p.directorComment || p.teacherComment);
+        const existingComment = existingCommentPlan ? (existingCommentPlan.guideComment || existingCommentPlan.directorComment || existingCommentPlan.teacherComment) : "";
+
         const newPlan = {
           id: 'plan_' + Date.now() + '_' + idx,
           studentId: studentId,
@@ -4547,7 +4574,10 @@ async function submitDailyPlans(studentId) {
           isPlanConfirmed: false,
           isApprovalRequested: false,
           isCompleted: false,
-          isConfirmed: false
+          isConfirmed: false,
+          guideComment: existingComment,
+          directorComment: existingComment,
+          teacherComment: existingComment
         };
 
         state.dailyPlans.push(newPlan);
@@ -4614,6 +4644,9 @@ async function confirmProgressPlans(studentId) {
         let duration = (eh * 60 + em) - (sh * 60 + sm);
         if (duration <= 0) duration = 60;
 
+        const existingCommentPlan = plansToday.find(p => p.guideComment || p.directorComment || p.teacherComment);
+        const existingComment = existingCommentPlan ? (existingCommentPlan.guideComment || existingCommentPlan.directorComment || existingCommentPlan.teacherComment) : "";
+
         const newPlan = {
           id: 'plan_' + Date.now() + '_' + idx,
           studentId: studentId,
@@ -4628,7 +4661,10 @@ async function confirmProgressPlans(studentId) {
           isPlanConfirmed: true,
           isApprovalRequested: true,
           isCompleted: true,
-          isConfirmed: false
+          isConfirmed: false,
+          guideComment: existingComment,
+          directorComment: existingComment,
+          teacherComment: existingComment
         };
         state.dailyPlans.push(newPlan);
         newPlansFromForm.push(newPlan);
@@ -4649,9 +4685,10 @@ async function confirmProgressPlans(studentId) {
 window.confirmProgressPlans = confirmProgressPlans;
 
 // --- 인쇄용 하단 노트 가로줄 피드백 및 지도 사항 코멘트 헬퍼 ---
+// --- 인쇄용 하단 노트 가로줄 피드백 및 지도 사항 코멘트 헬퍼 ---
 function renderPrintNotebookSectionHTML(studentId, plansToday = []) {
-  const firstPlan = plansToday[0] || {};
-  const todayGuideComment = firstPlan.guideComment || firstPlan.directorComment || firstPlan.teacherComment || "";
+  const commentPlan = plansToday.find(p => p.guideComment || p.directorComment || p.teacherComment) || plansToday[0] || {};
+  const todayGuideComment = commentPlan.guideComment || commentPlan.directorComment || commentPlan.teacherComment || "";
 
   // 1. 지난 지도 사항 조회 (현재 선택된 날짜보다 이전 날짜의 작성된 지도 사항)
   const pastPlans = state.dailyPlans.filter(p => 
@@ -4719,6 +4756,8 @@ function renderPrintNotebookSectionHTML(studentId, plansToday = []) {
             </div>
             <textarea id="printGuideComment_${studentId}" placeholder="금일 지도 사항 및 피드백 작성 (3줄 높이, 인쇄 시 자동 반영)" rows="3"
               style="width:100%; height:60px; min-height:60px; border:1px solid #cbd5e1; border-radius:4px; padding:6px 8px; font-size:12px; line-height:1.4; outline:none; background:#f8fafc; font-family:inherit; color:#1e293b; resize:none;"
+              oninput="saveProgressComments('${studentId}')"
+              onchange="saveProgressComments('${studentId}')"
               onblur="saveProgressComments('${studentId}')">${escapeHTML(todayGuideComment)}</textarea>
           </div>
         </div>
@@ -4743,27 +4782,35 @@ async function saveProgressComments(studentId, showAlert = false) {
   let plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
   
   if (plansToday.length === 0) {
-    const newPlan = {
-      id: 'plan_' + Date.now(),
-      studentId: studentId,
-      date: state.selectedDate,
-      activityName: '학습 지도 및 코멘트',
-      plannedStartTime: '14:00',
-      plannedEndTime: '15:00',
-      plannedDuration: 60,
-      actualStartTime: '14:00',
-      actualEndTime: '15:00',
-      actualDuration: 60,
-      isPlanConfirmed: true,
-      isApprovalRequested: false,
-      isCompleted: false,
-      isConfirmed: false,
-      guideComment: guideComment,
-      directorComment: guideComment,
-      teacherComment: guideComment
-    };
-    state.dailyPlans.push(newPlan);
-    plansToday = [newPlan];
+    const commentId = `pl-comment-${studentId}-${state.selectedDate}`;
+    let commentPlan = state.dailyPlans.find(p => p.id === commentId);
+    if (!commentPlan) {
+      commentPlan = {
+        id: commentId,
+        studentId: studentId,
+        date: state.selectedDate,
+        activityName: '학습 지도 및 코멘트',
+        plannedStartTime: '14:00',
+        plannedEndTime: '15:00',
+        plannedDuration: 60,
+        actualStartTime: '14:00',
+        actualEndTime: '15:00',
+        actualDuration: 60,
+        isPlanConfirmed: true,
+        isApprovalRequested: false,
+        isCompleted: false,
+        isConfirmed: false,
+        guideComment: guideComment,
+        directorComment: guideComment,
+        teacherComment: guideComment
+      };
+      state.dailyPlans.push(commentPlan);
+    } else {
+      commentPlan.guideComment = guideComment;
+      commentPlan.directorComment = guideComment;
+      commentPlan.teacherComment = guideComment;
+    }
+    plansToday = [commentPlan];
   } else {
     plansToday.forEach(p => {
       p.guideComment = guideComment;
@@ -4772,6 +4819,12 @@ async function saveProgressComments(studentId, showAlert = false) {
     });
   }
 
+  // 1. 메모리 및 로컬스토리지 즉시 저장 (메뉴 이동 시 데이터 유실 방지)
+  try {
+    localStorage.setItem("agy_daily_plans_backup", JSON.stringify(state.dailyPlans));
+  } catch(e) {}
+
+  // 2. DB 통합 동기화
   const commentRows = plansToday.map(p => ({ id: p.id, data: p }));
   await syncDailyPlans(commentRows);
 
