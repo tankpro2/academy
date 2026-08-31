@@ -20,12 +20,23 @@ let state = {
   notices: [],                // 공지사항 목록
   consultations: [],          // 상담 신청 내역 목록
   monthlyOperations: {},      // 월별 학원 가동 정보 (키: 'YYYY-MM', 값: { 'YYYY-MM-DD': { isHoliday, isClosed, start, end } })
+  progressComments: {},       // 지도 사항 개별 보존 스토어 (키: 'studentId_date', 값: commentText)
   
   // 시뮬레이션 기준 날짜
   selectedDate: new Date().toISOString().split("T")[0],
   progressStartDate: "",
   progressEndDate: ""
 };
+
+// 로컬스토리지에서 지도 사항 복원
+try {
+  const savedComments = localStorage.getItem("agy_progress_comments");
+  if (savedComments) {
+    state.progressComments = JSON.parse(savedComments);
+  }
+} catch(e) {
+  state.progressComments = {};
+}
 
 // HTML 이스케이프 헬퍼
 function escapeHTML(str) {
@@ -4684,26 +4695,93 @@ async function confirmProgressPlans(studentId) {
 }
 window.confirmProgressPlans = confirmProgressPlans;
 
-// --- 인쇄용 하단 노트 가로줄 피드백 및 지도 사항 코멘트 헬퍼 ---
+// 지도 사항 개별 보존 및 동기화 헬퍼
+function updateLocalProgressComment(studentId, commentText) {
+  if (!state.progressComments) state.progressComments = {};
+  const key = `${studentId}_${state.selectedDate}`;
+  state.progressComments[key] = commentText;
+  try {
+    localStorage.setItem("agy_progress_comments", JSON.stringify(state.progressComments));
+  } catch (e) {}
+
+  let plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
+  if (plansToday.length > 0) {
+    plansToday.forEach(p => {
+      p.guideComment = commentText;
+      p.directorComment = commentText;
+      p.teacherComment = commentText;
+    });
+  } else {
+    const commentId = `pl-comment-${studentId}-${state.selectedDate}`;
+    let commentPlan = state.dailyPlans.find(p => p.id === commentId);
+    if (!commentPlan) {
+      commentPlan = {
+        id: commentId,
+        studentId: studentId,
+        date: state.selectedDate,
+        activityName: '학습 지도 및 코멘트',
+        plannedStartTime: '14:00',
+        plannedEndTime: '15:00',
+        plannedDuration: 60,
+        actualStartTime: '14:00',
+        actualEndTime: '15:00',
+        actualDuration: 60,
+        isPlanConfirmed: true,
+        isApprovalRequested: false,
+        isCompleted: false,
+        isConfirmed: false,
+        guideComment: commentText,
+        directorComment: commentText,
+        teacherComment: commentText
+      };
+      state.dailyPlans.push(commentPlan);
+    } else {
+      commentPlan.guideComment = commentText;
+      commentPlan.directorComment = commentText;
+      commentPlan.teacherComment = commentText;
+    }
+  }
+
+  try {
+    localStorage.setItem("agy_daily_plans_backup", JSON.stringify(state.dailyPlans));
+  } catch (e) {}
+}
+window.updateLocalProgressComment = updateLocalProgressComment;
+
 // --- 인쇄용 하단 노트 가로줄 피드백 및 지도 사항 코멘트 헬퍼 ---
 function renderPrintNotebookSectionHTML(studentId, plansToday = []) {
+  const key = `${studentId}_${state.selectedDate}`;
+  const storedComment = state.progressComments ? state.progressComments[key] : undefined;
   const commentPlan = plansToday.find(p => p.guideComment || p.directorComment || p.teacherComment) || plansToday[0] || {};
-  const todayGuideComment = commentPlan.guideComment || commentPlan.directorComment || commentPlan.teacherComment || "";
+  const todayGuideComment = (storedComment !== undefined && storedComment !== null) 
+    ? storedComment 
+    : (commentPlan.guideComment || commentPlan.directorComment || commentPlan.teacherComment || "");
 
   // 1. 지난 지도 사항 조회 (현재 선택된 날짜보다 이전 날짜의 작성된 지도 사항)
-  const pastPlans = state.dailyPlans.filter(p => 
+  const pastMap = new Map();
+  
+  state.dailyPlans.filter(p => 
     p.studentId === studentId && 
     p.date < state.selectedDate && 
     (p.guideComment || p.directorComment || p.teacherComment)
-  );
-
-  const pastMap = new Map();
-  pastPlans.forEach(p => {
+  ).forEach(p => {
     const comment = (p.guideComment || p.directorComment || p.teacherComment || "").trim();
     if (comment && !pastMap.has(p.date)) {
       pastMap.set(p.date, comment);
     }
   });
+
+  if (state.progressComments) {
+    Object.keys(state.progressComments).forEach(k => {
+      const parts = k.split("_");
+      if (parts.length === 2 && parts[0] === studentId && parts[1] < state.selectedDate) {
+        const comment = (state.progressComments[k] || "").trim();
+        if (comment && !pastMap.has(parts[1])) {
+          pastMap.set(parts[1], comment);
+        }
+      }
+    });
+  }
 
   const pastComments = Array.from(pastMap.entries()).sort((a, b) => b[0].localeCompare(a[0]));
 
@@ -4756,7 +4834,7 @@ function renderPrintNotebookSectionHTML(studentId, plansToday = []) {
             </div>
             <textarea id="printGuideComment_${studentId}" placeholder="금일 지도 사항 및 피드백 작성 (3줄 높이, 인쇄 시 자동 반영)" rows="3"
               style="width:100%; height:60px; min-height:60px; border:1px solid #cbd5e1; border-radius:4px; padding:6px 8px; font-size:12px; line-height:1.4; outline:none; background:#f8fafc; font-family:inherit; color:#1e293b; resize:none;"
-              oninput="saveProgressComments('${studentId}')"
+              oninput="updateLocalProgressComment('${studentId}', this.value)"
               onchange="saveProgressComments('${studentId}')"
               onblur="saveProgressComments('${studentId}')">${escapeHTML(todayGuideComment)}</textarea>
           </div>
@@ -4779,52 +4857,9 @@ async function saveProgressComments(studentId, showAlert = false) {
   if (!guideCommentEl) return;
   const guideComment = guideCommentEl.value;
 
+  updateLocalProgressComment(studentId, guideComment);
+
   let plansToday = state.dailyPlans.filter(p => p.studentId === studentId && p.date === state.selectedDate);
-  
-  if (plansToday.length === 0) {
-    const commentId = `pl-comment-${studentId}-${state.selectedDate}`;
-    let commentPlan = state.dailyPlans.find(p => p.id === commentId);
-    if (!commentPlan) {
-      commentPlan = {
-        id: commentId,
-        studentId: studentId,
-        date: state.selectedDate,
-        activityName: '학습 지도 및 코멘트',
-        plannedStartTime: '14:00',
-        plannedEndTime: '15:00',
-        plannedDuration: 60,
-        actualStartTime: '14:00',
-        actualEndTime: '15:00',
-        actualDuration: 60,
-        isPlanConfirmed: true,
-        isApprovalRequested: false,
-        isCompleted: false,
-        isConfirmed: false,
-        guideComment: guideComment,
-        directorComment: guideComment,
-        teacherComment: guideComment
-      };
-      state.dailyPlans.push(commentPlan);
-    } else {
-      commentPlan.guideComment = guideComment;
-      commentPlan.directorComment = guideComment;
-      commentPlan.teacherComment = guideComment;
-    }
-    plansToday = [commentPlan];
-  } else {
-    plansToday.forEach(p => {
-      p.guideComment = guideComment;
-      p.directorComment = guideComment;
-      p.teacherComment = guideComment;
-    });
-  }
-
-  // 1. 메모리 및 로컬스토리지 즉시 저장 (메뉴 이동 시 데이터 유실 방지)
-  try {
-    localStorage.setItem("agy_daily_plans_backup", JSON.stringify(state.dailyPlans));
-  } catch(e) {}
-
-  // 2. DB 통합 동기화
   const commentRows = plansToday.map(p => ({ id: p.id, data: p }));
   await syncDailyPlans(commentRows);
 
