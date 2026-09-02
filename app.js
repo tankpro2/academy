@@ -4612,6 +4612,10 @@ async function submitDailyPlans(studentId) {
     return;
   }
 
+  try {
+    localStorage.setItem("agy_daily_plans_backup", JSON.stringify(state.dailyPlans));
+  } catch(e) {}
+
   await syncDailyPlans(allRows);
 
   alert("학습 계획이 제출되었습니다. 원장님/강사님의 확정 승인 후 실적 작성이 가능합니다.");
@@ -4692,6 +4696,10 @@ async function confirmProgressPlans(studentId) {
     ...plansToday.map(p => ({ id: p.id, data: p })),
     ...newPlansFromForm.map(p => ({ id: p.id, data: p }))
   ];
+
+  try {
+    localStorage.setItem("agy_daily_plans_backup", JSON.stringify(state.dailyPlans));
+  } catch(e) {}
 
   await syncDailyPlans(allRows);
 
