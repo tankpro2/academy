@@ -9,7 +9,7 @@ window.supabaseClient = supabaseClient;
 // 2. 어플리케이션 상태 관리 (State)
 let state = {
   currentUser: null,          // 현재 로그인한 사용자 객체 { username, role, is_password_changed, ref_id }
-  currentView: "dashboard",   // 현재 보고 있는 화면
+  currentView: "operations",  // 현재 보고 있는 화면
   students: [],               // 학생 목록
   teachers: [],               // 강사 목록
   teacherSchedules: [],       // 강사 근무계획 목록
@@ -490,7 +490,8 @@ function completeLoginSession() {
   
   loadAllData().then(() => {
     renderSidebarMenu();
-    navigate("dashboard");
+    const defaultView = (state.currentUser && state.currentUser.role === "student") ? "studentEnrollments" : "operations";
+    navigate(defaultView);
   });
 }
 
@@ -612,7 +613,6 @@ function renderSidebarMenu() {
   
   // 전체 메뉴 풀리스트 정의
   const allMenus = [
-    { key: "dashboard", label: "대시보드", icon: "layout-dashboard", roles: ["director", "teacher", "assistant", "student"] },
     { key: "operations", label: "운영 관리", icon: "calendar-range", roles: ["director", "teacher", "assistant"] },
     { key: "consultations", label: "상담 신청 내역", icon: "message-square", roles: ["director"] },
     { key: "students", label: "학생 관리", icon: "users", roles: ["director", "teacher", "assistant"] },
@@ -640,6 +640,9 @@ function renderSidebarMenu() {
 
 // 8. 라우팅 네비게이션
 function navigate(viewKey) {
+  if (!viewKey || viewKey === "dashboard") {
+    viewKey = (state.currentUser && state.currentUser.role === "student") ? "studentEnrollments" : "operations";
+  }
   state.currentView = viewKey;
 
   // 1. 사이드바 메뉴 활성화 즉시 갱신
@@ -650,9 +653,6 @@ function navigate(viewKey) {
 
   // 2. 화면 즉시 진입 및 렌더링 (대기 없이 즉시 오픈)
   switch (viewKey) {
-    case "dashboard":
-      if (typeof renderDashboard === 'function') renderDashboard();
-      break;
     case "operations":
       if (typeof renderOperations === 'function') renderOperations();
       break;
@@ -761,20 +761,6 @@ function renderDashboard() {
         </div>
         <i data-lucide="arrow-up-right"></i>
       </a>
-      
-      <!-- 대학 입학처 퀵링크 -->
-      <div class="card univ-links-card">
-        <div class="card-title">🎓 주요 대학 입학처 바로가기</div>
-        <div class="univ-links-grid">
-          <a href="https://admission.snu.ac.kr" target="_blank" class="univ-link-btn">서울대학교</a>
-          <a href="https://admission.yonsei.ac.kr" target="_blank" class="univ-link-btn">연세대학교</a>
-          <a href="https://kuoas.korea.ac.kr" target="_blank" class="univ-link-btn">고려대학교</a>
-          <a href="https://admission.skku.edu" target="_blank" class="univ-link-btn">성균관대학교</a>
-          <a href="https://admission.cau.ac.kr" target="_blank" class="univ-link-btn">중앙대학교</a>
-          <a href="https://go.hanyang.ac.kr" target="_blank" class="univ-link-btn">한양대학교</a>
-          <a href="https://admission.sogang.ac.kr" target="_blank" class="univ-link-btn">서강대학교</a>
-        </div>
-      </div>
     </div>
   `;
   
