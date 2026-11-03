@@ -247,6 +247,46 @@ async function saveDefaultMonthlyOperation(yearMonth) {
   await supabaseClient.from("agy_monthly_operations").upsert([{ year_month: yearMonth, configs }]);
 }
 
+// Supabase 1,000건 기본 조회 제한을 넘어 전체 데이터를 페이지네이션으로 모두 가져오는 헬퍼
+async function fetchAllFromTable(tableName) {
+  if (!supabaseClient) return { data: [], error: null };
+  const PAGE_SIZE = 1000;
+  let allRows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabaseClient
+      .from(tableName)
+      .select("*")
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) {
+      console.warn(`${tableName} 조회 오류 (offset ${from}):`, error);
+      return { data: allRows, error };
+    }
+    if (!data || data.length === 0) break;
+    allRows = allRows.concat(data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return { data: allRows, error: null };
+}
+window.fetchAllFromTable = fetchAllFromTable;
+
+// 수강신청(시간표) 로컬 백업 및 삭제 추적 헬퍼 (화면 이동 시 유실 방지)
+const pendingDeletedEnrollmentIds = new Set();
+function saveEnrollmentsBackup() {
+  try {
+    localStorage.setItem("agy_enrollments_backup", JSON.stringify(state.enrollments || []));
+  } catch (e) {}
+}
+function markEnrollmentsDeleted(ids) {
+  if (!Array.isArray(ids)) return;
+  ids.forEach(id => {
+    if (id) pendingDeletedEnrollmentIds.add(id);
+  });
+}
+window.saveEnrollmentsBackup = saveEnrollmentsBackup;
+window.markEnrollmentsDeleted = markEnrollmentsDeleted;
+
 // 5. 전체 데이터 로드 함수 (새로고침, 로그인 후 구동)
 async function loadAllData() {
   if (!supabaseClient) {
@@ -266,16 +306,16 @@ async function loadAllData() {
       resConsultations,
       resOperations
     ] = await Promise.all([
-      supabaseClient.from("agy_students").select("*"),
-      supabaseClient.from("agy_teachers").select("*"),
-      supabaseClient.from("agy_teacher_schedules").select("*"),
-      supabaseClient.from("agy_teacher_worklogs").select("*"),
-      supabaseClient.from("agy_enrollments").select("*"),
-      supabaseClient.from("agy_attendance").select("*"),
-      supabaseClient.from("agy_daily_plans").select("*"),
-      supabaseClient.from("agy_notices").select("*"),
-      supabaseClient.from("agy_consultations").select("*"),
-      supabaseClient.from("agy_monthly_operations").select("*")
+      fetchAllFromTable("agy_students"),
+      fetchAllFromTable("agy_teachers"),
+      fetchAllFromTable("agy_teacher_schedules"),
+      fetchAllFromTable("agy_teacher_worklogs"),
+      fetchAllFromTable("agy_enrollments"),
+      fetchAllFromTable("agy_attendance"),
+      fetchAllFromTable("agy_daily_plans"),
+      fetchAllFromTable("agy_notices"),
+      fetchAllFromTable("agy_consultations"),
+      fetchAllFromTable("agy_monthly_operations")
     ]);
     
     state.students = (resStudents.data || []).map(r => r.data);
@@ -283,7 +323,40 @@ async function loadAllData() {
     state.teachers = (resTeachers.data || []).map(r => r.data);
     state.teacherSchedules = (resSchedules.data || []).map(r => r.data);
     state.teacherWorkLogs = (resWorklogs.data || []).map(r => r.data);
-    state.enrollments = (resEnrollments.data || []).map(r => r.data);
+
+    // 수강신청(시간표) 데이터 병합 및 중복 제거
+    const fetchedEnrollments = (resEnrollments.data || [])
+      .map(r => r.data || r)
+      .filter(e => e && e.id && !pendingDeletedEnrollmentIds.has(e.id));
+    const cachedEnrStr = localStorage.getItem("agy_enrollments_backup");
+    if (cachedEnrStr) {
+      try {
+        const cachedEnrs = JSON.parse(cachedEnrStr);
+        if (Array.isArray(cachedEnrs)) {
+          const fetchedIds = new Set(fetchedEnrollments.map(e => e.id));
+          cachedEnrs.forEach(ce => {
+            if (ce && ce.id && !fetchedIds.has(ce.id) && !pendingDeletedEnrollmentIds.has(ce.id)) {
+              fetchedEnrollments.push(ce);
+              fetchedIds.add(ce.id);
+            }
+          });
+        }
+      } catch (e) {}
+    }
+    // 동일 학생/날짜/시작시간/종료시간 중복 제거
+    const uniqueEnrollments = [];
+    const seenEnrKeys = new Set();
+    fetchedEnrollments.forEach(e => {
+      if (!e || !e.studentId || !e.date) return;
+      const key = `${e.studentId}|${e.date}|${e.startTime}|${e.endTime}`;
+      if (!seenEnrKeys.has(key)) {
+        seenEnrKeys.add(key);
+        uniqueEnrollments.push(e);
+      }
+    });
+    state.enrollments = uniqueEnrollments;
+    saveEnrollmentsBackup();
+
     state.attendance = (resAttendance.data || []).map(r => r.data);
     if (resDailyPlans && resDailyPlans.data && resDailyPlans.data.length > 0) {
       const fetchedPlans = resDailyPlans.data.map(r => r.data || r).filter(Boolean);
@@ -3677,7 +3750,7 @@ async function applyWeeklyScheduleToMonth() {
     state.enrollments = state.enrollments.filter(e => !(e.studentId === enrollSelectedStudentId && e.date === dateStr));
 
     const item = {
-      id: `enr-weekly-${enrollSelectedStudentId}-${dateStr}-${Date.now()}`,
+      id: `enr-weekly-${enrollSelectedStudentId}-${dateStr}`,
       studentId: enrollSelectedStudentId,
       date: dateStr,
       startTime: match.start,
@@ -3691,15 +3764,26 @@ async function applyWeeklyScheduleToMonth() {
     addedDates.push(`${month}/${d}(${dayNames[dayOfWeek]})`);
   }
 
-  // DB 저장 시도
-  try {
-    const deletePromises = dbDeletes.map(id => supabaseClient.from("agy_enrollments").delete().eq("id", id));
-    await Promise.all(deletePromises);
-    
-    const upsertPromises = dbUpserts.map(item => supabaseClient.from("agy_enrollments").upsert([{ id: item.id, data: item }]));
-    await Promise.all(upsertPromises);
-  } catch(e) {
-    console.warn("DB 저장 실패, 로컬 반영:", e);
+  // 로컬 백업 즉시 저장 (다른 화면 이동 시 유실 방지)
+  markEnrollmentsDeleted(dbDeletes.filter(id => !dbUpserts.some(u => u.id === id)));
+  saveEnrollmentsBackup();
+
+  // DB 저장 시도 (일괄 처리)
+  if (supabaseClient) {
+    try {
+      const idsToDelete = dbDeletes.filter(id => !dbUpserts.some(u => u.id === id));
+      if (idsToDelete.length > 0) {
+        await supabaseClient.from("agy_enrollments").delete().in("id", idsToDelete);
+      }
+      if (dbUpserts.length > 0) {
+        const { error: upsertErr } = await supabaseClient
+          .from("agy_enrollments")
+          .upsert(dbUpserts.map(item => ({ id: item.id, data: item })));
+        if (upsertErr) console.error("주차별 시간표 DB 저장 오류:", upsertErr);
+      }
+    } catch(e) {
+      console.warn("DB 저장 실패, 로컬 반영:", e);
+    }
   }
 
   closeModal();
@@ -3908,6 +3992,8 @@ function handleCalendarDateClick(dateStr, isHoliday) {
 async function deleteEnrollment(id) {
   if (confirm("해당 수강신청을 취소(삭제)하시겠습니까?")) {
     state.enrollments = state.enrollments.filter(e => e.id !== id);
+    markEnrollmentsDeleted([id]);
+    saveEnrollmentsBackup();
     try {
       await supabaseClient.from("agy_enrollments").delete().eq("id", id);
     } catch(e) { console.warn("DB 삭제 실패, 로컬만 반영", e); }
@@ -3921,6 +4007,8 @@ window.deleteEnrollment = deleteEnrollment;
 // 학생용: 해당 날짜 수강 삭제 (로컬 + DB)
 async function deleteEnrollmentLocal(id, dateStr) {
   state.enrollments = state.enrollments.filter(e => e.id !== id);
+  markEnrollmentsDeleted([id]);
+  saveEnrollmentsBackup();
   try {
     await supabaseClient.from("agy_enrollments").delete().eq("id", id);
   } catch(e) { console.warn("DB 삭제 실패, 로컬만 반영", e); }
@@ -3980,6 +4068,7 @@ async function saveStudentEnrollmentLocal(dateStr) {
   };
   
   state.enrollments.push(item);
+  saveEnrollmentsBackup();
   
   try {
     await supabaseClient.from("agy_enrollments").upsert([{ id: item.id, data: item }]);
@@ -4004,12 +4093,16 @@ async function clearMonthEnrollments() {
   }
   if (!confirm(`${opsYearMonth.replace("-","년 ")}월 수강 일정 ${toDelete.length}개를 모두 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
 
+  const delIds = toDelete.map(e => e.id);
+  markEnrollmentsDeleted(delIds);
   toDelete.forEach(e => {
     state.enrollments = state.enrollments.filter(x => x.id !== e.id);
   });
+  saveEnrollmentsBackup();
   try {
-    const dels = toDelete.map(e => supabaseClient.from("agy_enrollments").delete().eq("id", e.id));
-    await Promise.all(dels);
+    if (delIds.length > 0) {
+      await supabaseClient.from("agy_enrollments").delete().in("id", delIds);
+    }
   } catch(err) { console.warn("DB 삭제 실패, 로컬만 반영", err); }
 
   renderStudentEnrollments();
@@ -4075,6 +4168,7 @@ async function handleSaveEnrollment(dateStr) {
     });
     
     state.enrollments.push(...upserts);
+    saveEnrollmentsBackup();
     await supabaseClient.from("agy_enrollments").upsert(upserts.map(u => ({ id: u.id, data: u })));
     closeModal();
     renderStudentEnrollments();
@@ -4461,7 +4555,7 @@ async function syncDailyPlans(upsertRows = [], deleteIds = []) {
         const { error } = await window.supabaseClient.from("agy_daily_plans").upsert(upsertRows);
         if (error) console.error("Supabase upsert error in syncDailyPlans:", error);
       }
-      const { data: fresh, error: fetchErr } = await window.supabaseClient.from("agy_daily_plans").select("*");
+      const { data: fresh, error: fetchErr } = await fetchAllFromTable("agy_daily_plans");
       if (!fetchErr && fresh && fresh.length > 0) {
         state.dailyPlans = fresh.map(r => r.data || r).filter(Boolean);
         sortPlans(state.dailyPlans);
